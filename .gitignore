@@ -1,8 +1,7 @@
-data/data/*
-visualization/animations/*
+data/*
+visualization/animations/*  
 visualization/plots/*
-experiments/*
-!experiments/experiment_manager.py
+
 
 # Python cache files
 __pycache__/
@@ -33,7 +32,7 @@ ENV/
 .coverage
 htmlcov/
 
-# HDF5 data files (unless you want to commit them)
+# HDF5 data files 
 *.h5
 
 # Environment files
