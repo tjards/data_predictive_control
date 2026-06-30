@@ -1,6 +1,6 @@
-## Model Predictive Control with Wind Modelling and Rejection 
+## Windy MPC
 
-The project implements Convex Model Predictive Control (MPC) with online disturbance modeling and rejection for application in windy conditions. We use [cvxpy](https://www.cvxpy.org/) for solving the convex optimization online. 
+The project implements Convex Model Predictive Control (MPC) with online disturbance modelling and rejection for application in windy conditions. We use [cvxpy](https://www.cvxpy.org/) for solving the convex optimization online. 
 
 ### Dynamics
 
@@ -21,7 +21,7 @@ subject to the dynamics above and constraints:
 $$x_{\min} \leq x(k+i) \leq x_{\max}, \quad \forall\, i = 1, \ldots, h$$
 $$u_{\min} \leq u(k+i) \leq u_{\max}, \quad \forall\, i = 0, \ldots, h-1$$
 
-where $Q \succeq 0$ weighs the state cost, $R \succ 0$ weights the input cost, and $P \succeq 0$ is the terminal cost (nominally computed as the solution to the [Discrete Algebraic Riccati Equation](https://docs.scipy.org/doc/scipy/reference/generated/scipy.linalg.solve_discrete_are.html)).
+where $Q \succeq 0$ weighs the state cost, $R \succ 0$ weighs the input cost, and $P \succeq 0$ is the terminal cost (nominally computed as the solution to the [Discrete Algebraic Riccati Equation](https://docs.scipy.org/doc/scipy/reference/generated/scipy.linalg.solve_discrete_are.html)).
 
 ### Wind Modelling and Rejection
 
@@ -60,11 +60,11 @@ pip install -r requirements.txt
 python main.py
 ```
  
-Parameters are configured in`config.json`. 
+Parameters are configured in `config.json`. 
 
 ## References
 
 - Parts of this project were developed with the assistance of Claude Sonnet 4.6
-- Optimization: [cvxpy](https://www.cvxpy.org/)
+- Solving the optimization: [cvxpy](https://www.cvxpy.org/)
 - Solving for P using Discrete Algebraic Riccati Equation: [scipy.linalg.solve_discrete_are](https://docs.scipy.org/doc/scipy/reference/generated/scipy.linalg.solve_discrete_are.html)
 - Using Moore-Penrose pseudoinverse to solve for disturbance: [numpy.linalg.lstsq](https://numpy.org/doc/stable/reference/generated/numpy.linalg.lstsq.html) 
