@@ -21,7 +21,7 @@ A   = np.array(cfg['A'])
 B   = np.array(cfg['B'])
 Q   = np.diag(cfg['Q_diag'])
 R   = np.diag(cfg['R_diag'])
-P   = np.diag(cfg['P_diag'])
+P   = cfg['P_diag']  # may be 'dare' string or a list of diagonal values
 x0  = np.array(cfg['x0'], dtype=float)
 u0  = np.array(cfg['u0'], dtype=float)
 h   = cfg['h']
@@ -29,7 +29,7 @@ m   = cfg['m']
 constraints = cfg['constraints']
 
 # initialize the MPC controller
-controller = mpc.MPC(A, B, Q, R, P, x0, u0, h, m, constraints)
+controller = mpc.MPC(A, B, Q, R, P, x0, u0, h, m, constraints, disturbance=False)
 
 # ------------------------------------------------------------------
 # Simulation

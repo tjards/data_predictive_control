@@ -8,10 +8,11 @@ with open('config.json') as f:
 A   = np.array(cfg['A'])
 B   = np.array(cfg['B'])
 constraints = cfg['constraints']
+d   = np.array(cfg['d'])
 
 def evolve(x, u):
         
-    x_next = A @ x + B @ u
+    x_next = A @ x + B @ (u + d)
 
     x_next[2] = np.clip(x_next[2], constraints['x_min'][2], constraints['x_max'][2])
     x_next[3] = np.clip(x_next[3], constraints['x_min'][3], constraints['x_max'][3])

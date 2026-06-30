@@ -1,47 +1,29 @@
 '''
-Produced by Claude Sonnet 4.6
+
+This mostly module vibe-coded using Claude Sonnet 4.6
 
 Minor refinements made by author: tjards
 
 '''
 
+# standard imports 
 import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib.animation as animation
 
 
+# helper function for contour plotting
 def _cost_grid(X, Y, V):
-    """
-    Evaluate J(x) = x^T V x over a 2D (x1, x2) grid.
-    States x3, x4, ... are held at zero (position-plane slice).
-    """
-    pts = np.stack([X, Y], axis=-1)   # (..., 2)
-    V2  = V[:2, :2]                   # upper-left 2x2 block
+    pts = np.stack([X, Y], axis=-1)   
+    V2  = V[:2, :2]                   
     return np.einsum('...i,ij,...j->...', pts, V2, pts)
 
 
 def animate_trajectory(state_history, predicted_sequences, V,
                        x_target=None, filename='trajectory.gif'):
     
-    """
-    Produce a GIF of the MPC closed-loop trajectory overlaid on a cost
-    function contour map.
-
-    Parameters
-    ----------
-    state_history : list[ndarray (nx,)]
-        Actual state at each simulation step (length T+1).
-    predicted_sequences : list[ndarray (h, nx)]
-        MPC-predicted state sequences at each step (length T).
-    V : ndarray (nx, nx)
-        Positive-definite matrix for cost contours (e.g. DARE solution).
-    x_target : ndarray (nx,), optional
-        Target state; defaults to the zero vector.
-    filename : str
-        Output filename for the animated GIF.
-    """
-    states = np.array(state_history)        # (T+1, nx)
-    T      = len(predicted_sequences)       # number of MPC steps
+    states = np.array(state_history)        
+    T      = len(predicted_sequences)      
     nx     = V.shape[0]
 
     if x_target is None:
@@ -59,7 +41,7 @@ def animate_trajectory(state_history, predicted_sequences, V,
     x2_min = min(all_pts[:, 1].min(), x_target[1]) - margin
     x2_max = max(all_pts[:, 1].max(), x_target[1]) + margin
 
-    # Square up the axes so the contours look right
+    # square the grid for better visualization
     r1, r2 = x1_max - x1_min, x2_max - x2_min
     if r1 > r2:
         pad = (r1 - r2) / 2
@@ -77,64 +59,72 @@ def animate_trajectory(state_history, predicted_sequences, V,
     X, Y = np.meshgrid(xx, yy)
     Z    = _cost_grid(X, Y, V)
 
-    # Logarithmic levels give dark centre, light exterior
+    # log levels give dark centre, light exterior
     z_lo   = max(float(Z.min()), 1e-8)
     z_hi   = float(Z.max())
     levels = np.logspace(np.log10(z_lo), np.log10(z_hi), 30)
 
     # ------------------------------------------------------------------
-    # Static figure elements
+    # Figure elements
     # ------------------------------------------------------------------
+    
     fig, ax = plt.subplots(figsize=(7, 7))
+
+    # contours
     ax.contourf(X, Y, Z, levels=levels, cmap='gray_r')
-    ax.contour(X, Y, Z, levels=levels, colors='dimgray',
-               linewidths=0.4, linestyles='--', alpha=0.5)
+    ax.contour(X, Y, Z, levels=levels, colors='dimgray', linewidths=0.4, linestyles='--', alpha=0.5)
 
-    ax.plot(x_target[0], x_target[1], 'g+', markersize=14, markeredgewidth=2,
-            label='target', zorder=6)
-    ax.plot(states[0, 0], states[0, 1], 'ro', markersize=8,
-            label='start', zorder=6)
+    # targets
+    ax.plot(x_target[0], x_target[1], 'g+', markersize=14, markeredgewidth=2, label='target', zorder=6)
+    
+    # states
+    ax.plot(states[0, 0], states[0, 1], 'ro', markersize=8, label='start', zorder=6)
 
-    # Dynamic elements
-    trace_line, = ax.plot([], [], color='royalblue', lw=2.0,
-                          label='trajectory', zorder=5)
+    # trajectory
+    trace_line, = ax.plot([], [], color='royalblue', lw=2.0, label='trajectory', zorder=5)
     cur_dot,    = ax.plot([], [], 'o', color='royalblue', markersize=8, zorder=7)
-    pred_line,  = ax.plot([], [], color='royalblue', lw=1.0, alpha=0.75, ls=':',
-                          label='predicted', zorder=4)
+    
+    # predictions 
+    pred_line,  = ax.plot([], [], color='royalblue', lw=1.0, alpha=0.75, ls=':', zorder=4)
+    pred_dots,  = ax.plot([], [], 'o', color='royalblue', markersize=4, alpha=0.75, label='predicted', zorder=5)
 
     ax.set_xlim(x1_min, x1_max)
     ax.set_ylim(x2_min, x2_max)
     ax.set_xlabel('$x_1$  (position)', fontsize=12)
     ax.set_ylabel('$x_2$  (position)', fontsize=12)
-    ax.set_title('MPC Closed-Loop Trajectory', fontsize=13)
+    ax.set_title('Convex MPC Trajectory', fontsize=13)
     ax.legend(loc='upper right', fontsize=10)
     ax.set_aspect('equal')
     plt.tight_layout()
 
     # ------------------------------------------------------------------
-    # Animation callbacks
+    # animation callbacks
     # ------------------------------------------------------------------
     def init():
         trace_line.set_data([], [])
         cur_dot.set_data([], [])
         pred_line.set_data([], [])
-        return trace_line, cur_dot, pred_line
+        pred_dots.set_data([], [])
+        return trace_line, cur_dot, pred_line, pred_dots
 
     def update(frame):
-        # Actual trajectory up to this frame
+        
+        # trajectory update 
         trace_line.set_data(states[:frame + 1, 0], states[:frame + 1, 1])
         cur_dot.set_data([states[frame, 0]], [states[frame, 1]])
 
-        # Predicted horizon from current state (if still within sim window)
+        # prediction update
         if frame < T:
-            pred = predicted_sequences[frame]             # (h, nx)
+            pred = predicted_sequences[frame]            
             px   = np.concatenate([[states[frame, 0]], pred[:, 0]])
             py   = np.concatenate([[states[frame, 1]], pred[:, 1]])
             pred_line.set_data(px, py)
+            pred_dots.set_data(pred[:, 0], pred[:, 1])
         else:
             pred_line.set_data([], [])
+            pred_dots.set_data([], [])
 
-        return trace_line, cur_dot, pred_line
+        return trace_line, cur_dot, pred_line, pred_dots
 
     ani = animation.FuncAnimation(
         fig, update,
@@ -150,23 +140,12 @@ def animate_trajectory(state_history, predicted_sequences, V,
 
 
 def plot_inputs(input_history, constraints, filename='inputs.png'):
-    """
-    Static plot of applied control inputs over time vs. constraint bounds.
 
-    Parameters
-    ----------
-    input_history : list[ndarray (nu,)]
-        Applied input at each step (length T).
-    constraints : dict
-        The constraints dict from config (box or lmi supported for bounds).
-    filename : str
-        Output filename for the saved figure.
-    """
-    inputs = np.array(input_history)   # (T, nu)
+    inputs = np.array(input_history)   
     T, nu  = inputs.shape
     steps  = np.arange(T)
 
-    # Extract scalar bounds per input channel (box constraints only)
+    # bounds
     u_min = u_max = None
     if constraints.get('type') == 'box':
         u_min = np.array(constraints['u_min'], dtype=float)
@@ -187,7 +166,6 @@ def plot_inputs(input_history, constraints, filename='inputs.png'):
                        label=f'$u_{{{i+1},min}}$ = {u_min[i]:.2g}')
             ax.axhline(u_max[i], color=color, lw=1.2, ls=':',  alpha=0.7,
                        label=f'$u_{{{i+1},max}}$ = {u_max[i]:.2g}')
-            # Shade the feasible band
             ax.axhspan(u_min[i], u_max[i], color=color, alpha=0.06)
 
         ax.set_ylabel(f'$u_{i+1}$', fontsize=12)
@@ -203,21 +181,7 @@ def plot_inputs(input_history, constraints, filename='inputs.png'):
 
 
 def plot_velocities(state_history, constraints, vel_indices=None, filename='velocities.png'):
-    """
-    Static plot of velocity states over time vs. state constraint bounds.
 
-    Parameters
-    ----------
-    state_history : list[ndarray (nx,)]
-        Actual state at each simulation step (length T+1).
-    constraints : dict
-        The constraints dict from config.
-    vel_indices : list[int], optional
-        Indices of velocity states in the state vector. Defaults to the
-        second half (e.g. [2, 3] for nx=4).
-    filename : str
-        Output filename for the saved figure.
-    """
     states = np.array(state_history)   # (T+1, nx)
     T, nx  = states.shape
     steps  = np.arange(T)
@@ -225,7 +189,7 @@ def plot_velocities(state_history, constraints, vel_indices=None, filename='velo
     if vel_indices is None:
         vel_indices = list(range(nx // 2, nx))
 
-    # Extract bounds for velocity indices (box constraints only)
+    # bounds
     x_min = x_max = None
     if constraints.get('type') == 'box':
         x_min = np.array(constraints['x_min'], dtype=float)

@@ -1,9 +1,10 @@
 '''
-Implementation of convex Model Predictive Control (MPC)
+Implementation of convex Model Predictive Control (MPC) with disturbance rejection
 
 Standard Form:
 
-x(k+1) = Ax(k) + Bu(k)
+x(k+1) = Ax(k) + B (u(k) + d) 
+J = sum_{i=0}^{h-1} x(k+i)'Qx(k+i) + u(k+i)'Ru(k+i) + x(k+h)'Px(k+h)
 
 Constraints:
 
@@ -19,17 +20,24 @@ Constraints:
 
 import numpy as np
 import cvxpy as cp
+from scipy.linalg import solve_discrete_are
 
 class MPC():
 
-    def __init__(self, A, B, Q, R, P, x0, u0, h, m, constraints):
+    def __init__(self, A, B, Q, R, P, x0, u0, h, m, constraints, disturbance=False):
 
         # store the attributes passed in 
         self.A = np.array(A, ndmin=2)           # state matrix  
         self.B = np.array(B, ndmin=2)           # input matrix
         self.Q = np.array(Q, ndmin=2)           # state cost matrix
         self.R = np.array(R, ndmin=2)           # input cost matrix
-        self.P = np.array(P, ndmin=2)           # terminal cost matrix
+        
+        # we can compute terminal cost based on solution to Discrete Algebraic Riccati Equation
+        if isinstance(P, str) and P.lower() == 'dare':
+            self.P = solve_discrete_are(self.A, self.B, self.Q, self.R)  
+        # or hardcoded
+        else:
+            self.P = np.array(P, ndmin=2)       # terminal
         self.x0 = np.array(x0).reshape(-1, 1)   # initial state
         self.u0 = np.array(u0).reshape(-1, 1)   # initial input
         self.h = h                              # prediction horizon
@@ -37,6 +45,13 @@ class MPC():
         self.nx = self.A.shape[0]               # state dimensions
         self.nu = self.B.shape[1]               # input dimensions
         self.constraints = constraints
+        self.disturbance = disturbance
+        
+        # we can do disturbance rejection
+        if self.disturbance:
+            self.d_hat = np.zeros((self.nu, 1))  # estimated input disturbance
+            self.x_prev = None                   # previous measured state
+            self.u_prev = None                   # previous commanded input
         
         self.update_internal_parameters()  
 
@@ -74,12 +89,18 @@ class MPC():
         # initialize the augmented matrices over prediction horizon
         self.A_aug = np.zeros((self.nx * self.h, self.nx))
         self.B_aug = np.zeros((self.nx * self.h, self.nu * self.h))
+        if self.disturbance:
+            self.D_aug = np.zeros((self.nx * self.h, self.nu * self.h))
+        else:
+            self.D_aug = None
 
         # build the augmented matrices
         for i in range(self.h):
             self.A_aug[i*self.nx:(i+1)*self.nx, :] = np.linalg.matrix_power(self.A, i+1)
             for j in range(i+1):
                 self.B_aug[i*self.nx:(i+1)*self.nx, j*self.nu:(j+1)*self.nu] = np.linalg.matrix_power(self.A, i-j) @ self.B
+        if self.disturbance:
+            self.D_aug = self.B_aug @ np.tile(np.eye(self.nu), (self.h, 1))
 
     def _build_augmented_cost_matrices(self):
 
@@ -119,20 +140,30 @@ class MPC():
     def _construct_optimization_problem(self):
 
         # define the optimization variables
-        self.opt_u      = cp.Variable((self.nu * self.h, 1))
-        self.opt_cost   = cp.quad_form(self.A_aug @ self.x0 + self.B_aug @ self.opt_u, self.Q_aug) + cp.quad_form(self.opt_u, self.R_aug)
-        self.opt_constraints = []
+        self.opt_u = cp.Variable((self.nu * self.h, 1))
 
+        # disturbance feedforward offset
+        if self.disturbance:
+            d_offset = self.D_aug @ self.d_hat
+        else:
+            d_offset = np.zeros((self.nx * self.h, 1))
+
+        # define the predicted state sequence     
+        x_pred = self.A_aug @ self.x0 + self.B_aug @ self.opt_u + d_offset
+
+        # define the cost function 
+        self.opt_cost = cp.quad_form(x_pred, self.Q_aug) + cp.quad_form(self.opt_u, self.R_aug)
+        
+        #define the constraints
+        self.opt_constraints = []
         if self.constraints["type"] == "box":
-            self.opt_constraints += [self.x_min_aug <= self.A_aug @ self.x0 + self.B_aug @ self.opt_u]
-            self.opt_constraints += [self.A_aug @ self.x0 + self.B_aug @ self.opt_u <= self.x_max_aug]
+            self.opt_constraints += [self.x_min_aug <= x_pred]
+            self.opt_constraints += [x_pred <= self.x_max_aug]
             self.opt_constraints += [self.u_min_aug <= self.opt_u]
             self.opt_constraints += [self.opt_u <= self.u_max_aug]
-
         elif self.constraints["type"] == "lmi":
-            self.opt_constraints += [self.Mx_aug @ (self.A_aug @ self.x0 + self.B_aug @ self.opt_u) <= self.bx_aug]
+            self.opt_constraints += [self.Mx_aug @ x_pred <= self.bx_aug]
             self.opt_constraints += [self.Mu_aug @ self.opt_u <= self.bu_aug]
-
         else:
             raise ValueError(f"Unknown constraint type: {self.constraints['type']}")
 
@@ -144,7 +175,12 @@ class MPC():
         self.x0 = np.array(x0).reshape(-1, 1)
         self.u0 = np.array(u0).reshape(-1, 1)
 
-        # (re)build the problem with current x0,  u0
+        # update disturbance estimate from one-step prediction error
+        if self.disturbance and self.x_prev is not None:
+            prediction_error = self.x0 - self.A @ self.x_prev - self.B @ self.u_prev
+            self.d_hat, _, _, _ = np.linalg.lstsq(self.B, prediction_error, rcond=None)
+
+        # (re)build the problem with current x0, u0, d_hat
         self._construct_optimization_problem()
 
         # solve the optimization problem
@@ -153,14 +189,18 @@ class MPC():
         if self.prob.status not in ("optimal", "optimal_inaccurate"):
             raise RuntimeError(f"MPC solver failed: {self.prob.status}")
 
-        # results 
-        self.result_control_next = self.opt_u.value[:self.nu]
-        self.result_control_sequence = self.opt_u.value
-        self.result_state_sequence = self.A_aug @ self.x0 + self.B_aug @ self.opt_u.value
+        # results
+        self.result_control_next        = self.opt_u.value[:self.nu]
+        self.result_control_sequence    = self.opt_u.value
+        if self.disturbance:
+            d_offset                    = self.D_aug @ self.d_hat
+        else:
+            d_offset                    = np.zeros((self.nx * self.h, 1))
+        self.result_state_sequence      = self.A_aug @ self.x0 + self.B_aug @ self.opt_u.value + d_offset
 
-
-
-
-
+        # store state and commanded input for next disturbance update
+        if self.disturbance:
+            self.x_prev = self.x0.copy()
+            self.u_prev = self.result_control_next.copy()
 
 
