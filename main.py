@@ -17,6 +17,8 @@ import plant    # simulates actual plant dynamics
 with open('config.json') as f:
     cfg = json.load(f)
 
+Ts = cfg['Ts']  
+Tf = cfg['Tf']
 A   = np.array(cfg['A'])
 B   = np.array(cfg['B'])
 Q   = np.diag(cfg['Q_diag'])
@@ -27,14 +29,14 @@ u0  = np.array(cfg['u0'], dtype=float)
 h   = cfg['h']
 m   = cfg['m']
 constraints = cfg['constraints']
+disturbance = cfg['disturbance'] 
 
 # initialize the MPC controller
-controller = mpc.MPC(A, B, Q, R, P, x0, u0, h, m, constraints, disturbance=False)
+controller = mpc.MPC(A, B, Q, R, P, x0, u0, h, m, constraints, disturbance)
 
 # ------------------------------------------------------------------
 # Simulation
 # ------------------------------------------------------------------
-Ts = 100
 x = x0.copy()
 u = u0.copy()
 
@@ -43,7 +45,7 @@ state_history       = [x.copy()]
 predicted_sequences = []
 input_history       = []
 
-for k in range(Ts):
+for k in range(int(Tf / Ts)):
 
     # run controller
     controller.solve(x, u)

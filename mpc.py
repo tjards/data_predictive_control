@@ -41,7 +41,7 @@ class MPC():
         self.x0 = np.array(x0).reshape(-1, 1)   # initial state
         self.u0 = np.array(u0).reshape(-1, 1)   # initial input
         self.h = h                              # prediction horizon
-        self.m = m                              # FOR LATER: control horizon (inputs frozen after m steps: m <= h)
+        self.m = m                              # control horizon (inputs freeze after m <= h)
         self.nx = self.A.shape[0]               # state dimensions
         self.nu = self.B.shape[1]               # input dimensions
         self.constraints = constraints
@@ -139,8 +139,15 @@ class MPC():
         
     def _construct_optimization_problem(self):
 
-        # define the optimization variables
-        self.opt_u = cp.Variable((self.nu * self.h, 1))
+        # define the optimization variables (optimized up to m, then will be frozen up to h)
+        self.opt_u = cp.Variable((self.nu * self.m, 1))
+
+        # define full input sequence: opt_u up to m + frozen inputs 
+        if self.m < self.h:
+            u_last = self.opt_u[(self.m - 1) * self.nu : self.m * self.nu]
+            self.u_full = cp.vstack([self.opt_u] + [u_last] * (self.h - self.m))
+        else:
+            self.u_full = self.opt_u
 
         # disturbance feedforward offset
         if self.disturbance:
@@ -149,21 +156,21 @@ class MPC():
             d_offset = np.zeros((self.nx * self.h, 1))
 
         # define the predicted state sequence     
-        x_pred = self.A_aug @ self.x0 + self.B_aug @ self.opt_u + d_offset
+        x_pred = self.A_aug @ self.x0 + self.B_aug @ self.u_full + d_offset
 
         # define the cost function 
-        self.opt_cost = cp.quad_form(x_pred, self.Q_aug) + cp.quad_form(self.opt_u, self.R_aug)
+        self.opt_cost = cp.quad_form(x_pred, self.Q_aug) + cp.quad_form(self.u_full, self.R_aug)
         
         #define the constraints
         self.opt_constraints = []
         if self.constraints["type"] == "box":
             self.opt_constraints += [self.x_min_aug <= x_pred]
             self.opt_constraints += [x_pred <= self.x_max_aug]
-            self.opt_constraints += [self.u_min_aug <= self.opt_u]
-            self.opt_constraints += [self.opt_u <= self.u_max_aug]
+            self.opt_constraints += [self.u_min_aug <= self.u_full]
+            self.opt_constraints += [self.u_full <= self.u_max_aug]
         elif self.constraints["type"] == "lmi":
             self.opt_constraints += [self.Mx_aug @ x_pred <= self.bx_aug]
-            self.opt_constraints += [self.Mu_aug @ self.opt_u <= self.bu_aug]
+            self.opt_constraints += [self.Mu_aug @ self.u_full <= self.bu_aug]
         else:
             raise ValueError(f"Unknown constraint type: {self.constraints['type']}")
 
@@ -190,13 +197,13 @@ class MPC():
             raise RuntimeError(f"MPC solver failed: {self.prob.status}")
 
         # results
-        self.result_control_next        = self.opt_u.value[:self.nu]
-        self.result_control_sequence    = self.opt_u.value
+        self.result_control_next        = self.u_full.value[:self.nu]
+        self.result_control_sequence    = self.u_full.value
         if self.disturbance:
             d_offset                    = self.D_aug @ self.d_hat
         else:
             d_offset                    = np.zeros((self.nx * self.h, 1))
-        self.result_state_sequence      = self.A_aug @ self.x0 + self.B_aug @ self.opt_u.value + d_offset
+        self.result_state_sequence      = self.A_aug @ self.x0 + self.B_aug @ self.u_full.value + d_offset
 
         # store state and commanded input for next disturbance update
         if self.disturbance:
