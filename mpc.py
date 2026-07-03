@@ -21,7 +21,128 @@ Constraints:
 import numpy as np
 import cvxpy as cp
 from scipy.linalg import solve_discrete_are
+from dataclasses import dataclass
 
+# interface for passing MPC parameters
+'''
+@dataclass
+class MPCParameters():
+    A: np.ndarray
+    B: np.ndarray
+    Q: np.ndarray
+    R: np.ndarray
+    P: np.ndarray
+'''
+
+# online modeller
+class Modeller():
+    
+    def __init__(self, A, B, learning_rate = 0.1, window_size=40, optimizer = 'least_squares', update_parameters_rate=10):
+
+        self.A_hat = np.array(A, ndmin=2)
+        self.B_hat = np.array(B, ndmin=2)
+        self.nx = int(A.shape[0])
+        self.nu = int(B.shape[1])
+        self.window_size = int(window_size)         # window to collect data                # refit every this many steps
+        #self.A_hat = np.zeros((self.nx, self.nx))
+        #self.B_hat = np.zeros((self.nx, self.nu))
+        self.Phi = np.zeros((self.nx, self.nx + self.nu))  
+        self.learning_rate = learning_rate
+        self.optimizer = optimizer
+        self.update_parameters_rate = int(update_parameters_rate) 
+        self.update_parameters_count = 0
+
+        self.X = np.zeros((self.nx, self.window_size))
+        self.U = np.zeros((self.nu, self.window_size))
+
+        self.scale_x  = np.ones((self.nx, 1))
+        self.scale_u  = np.ones((self.nu, 1))
+        self.scale_dx = np.ones((self.nx, 1))
+
+        self.viable = False
+        self.shared = False
+
+    def update(self, x, u):
+
+        self.accumulate_data(x, u)
+        self.update_parameters_count += 1
+        if self.update_parameters_count >= self.update_parameters_rate:
+            self.fit()
+            self.update_parameters_count = 0
+            self.do_fit = True
+        else:
+            self.do_fit = False
+    # accumulate data over window 
+    def accumulate_data(self, x, u):
+
+        # shift data to the left and add new data to the right
+        self.X[:, :-1] = self.X[:, 1:]
+        self.U[:, :-1] = self.U[:, 1:]
+        self.X[:, -1] = x.flatten()
+        self.U[:, -1] = u.flatten()
+
+    # fit x(k+1) = Ix(k) + A_tilde*x(k) + B*u(k) + Bd
+    # equivalently: dx = x(k+1) - x(k) = A_tilde*x(k) + B*u(k) + bias
+    def fit(self):
+
+        if self.optimizer == 'least_squares':
+
+            X_curr = self.X[:, :-1]
+            U_curr = self.U[:, :-1]
+            X_next = self.X[:, 1:]
+            N = X_curr.shape[1]
+
+            # factor out identity: regress on the residual
+            dX = X_next - X_curr                                                # (nx, N)
+
+            # per-feature scale factors (std over window, floored to avoid divide-by-zero)
+            self.scale_x  = np.maximum(np.std(X_curr, axis=1, keepdims=True), 1e-8)  # (nx, 1)
+            self.scale_u  = np.maximum(np.std(U_curr, axis=1, keepdims=True), 1e-8)  # (nu, 1)
+            self.scale_dx = np.maximum(np.std(dX,     axis=1, keepdims=True), 1e-8)  # (nx, 1)
+
+            # normalize
+            X_n  = X_curr / self.scale_x
+            U_n  = U_curr / self.scale_u
+            dX_n = dX     / self.scale_dx
+
+            # stack normalized regressor with bias column (absorbs Bd in normalized space)
+            Z_n = np.vstack([X_n, U_n, np.ones((1, N))])
+
+            # least squares in normalized space: dX_n ≈ Phi_n * Z_n
+            Phi_n, _, _, _ = np.linalg.lstsq(Z_n.T, dX_n.T, rcond=None)
+            Phi_n = Phi_n.T                                                     # (nx, nx+nu+1)
+
+            # un-normalize: A_tilde = diag(scale_dx) @ Phi_n[:, :nx] @ diag(1/scale_x)
+            S_dx = np.diag(self.scale_dx.flatten())
+            A_tilde = S_dx @ Phi_n[:, :self.nx]          @ np.diag(1.0 / self.scale_x.flatten())
+            B_new   = S_dx @ Phi_n[:, self.nx:self.nx+self.nu] @ np.diag(1.0 / self.scale_u.flatten())
+
+            # recover A_hat by adding back the identity
+            A_new = np.eye(self.nx) + A_tilde
+
+            self.A_hat = (1-self.learning_rate) * self.A_hat + self.learning_rate * A_new
+            self.B_hat = (1-self.learning_rate) * self.B_hat + self.learning_rate * B_new
+
+            # mark as stable and controllable when both conditions hold
+            is_stable = np.all(np.abs(np.linalg.eigvals(self.A_hat)) < 1.1)
+
+            # controllability matrix [B | AB | A^2 B | ... | A^(nx-1) B]
+            C = np.hstack([np.linalg.matrix_power(self.A_hat, i) @ self.B_hat
+                           for i in range(self.nx)])
+            is_controllable = np.linalg.matrix_rank(C) == self.nx
+
+            if is_stable and is_controllable:
+                self.viable = True
+                print('stable and controllable model found')
+            else:
+                self.viable = False
+
+            self.shared = False
+
+        else:
+            raise ValueError(f"Unknown optimizer: {self.optimizer}")
+
+# controller
 class MPC():
 
     def __init__(self, A, B, Q, R, P, x0, u0, h, m, constraints, disturbance=False):
@@ -46,7 +167,7 @@ class MPC():
         self.nu = self.B.shape[1]               # input dimensions
         self.constraints = constraints
         self.disturbance = disturbance
-        
+
         # we can do disturbance rejection
         if self.disturbance:
             self.d_hat = np.zeros((self.nu, 1))  # estimated input disturbance
@@ -82,7 +203,7 @@ class MPC():
     def _augment_matrices(self):
         self._build_augmented_system_matrices()
         self._build_augmented_cost_matrices()
-        self.build_augmented_constraints()
+        self._build_augmented_constraints()
 
     def _build_augmented_system_matrices(self):
 
@@ -120,7 +241,7 @@ class MPC():
             # R is used for all steps 
             self.R_aug[i*self.nu:(i+1)*self.nu, i*self.nu:(i+1)*self.nu] = self.R
     
-    def build_augmented_constraints(self):
+    def _build_augmented_constraints(self):
        
         if self.constraints["type"] == "box":
             self.x_min_aug = np.tile(np.asarray(self.x_min).reshape(-1), self.h)

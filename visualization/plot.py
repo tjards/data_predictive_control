@@ -33,7 +33,7 @@ def animate_trajectory(state_history, predicted_sequences, V,
     # ------------------------------------------------------------------
     # Grid bounds: cover all actual + predicted states with margin
     # ------------------------------------------------------------------
-    all_pts = np.vstack([states[:, :2]] + [p[:, :2] for p in predicted_sequences])
+    all_pts = np.vstack([states[:, :2]] + [p[:, :2] for p in predicted_sequences if p is not None])
     margin  = 0.5
 
     x1_min = min(all_pts[:, 0].min(), x_target[0]) - margin
@@ -114,7 +114,7 @@ def animate_trajectory(state_history, predicted_sequences, V,
         cur_dot.set_data([states[frame, 0]], [states[frame, 1]])
 
         # prediction update
-        if frame < T:
+        if frame < T and predicted_sequences[frame] is not None:
             pred = predicted_sequences[frame]            
             px   = np.concatenate([[states[frame, 0]], pred[:, 0]])
             py   = np.concatenate([[states[frame, 1]], pred[:, 1]])
