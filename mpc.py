@@ -1,5 +1,9 @@
 '''
-Implementation of convex Model Predictive Control (MPC) with disturbance rejection
+Implementation of Convex Data-based Predictive Control (Convex DPC) with:
+
+-  data-driven modelling 
+-  disturbance rejection
+
 
 Standard Form:
 
@@ -21,7 +25,6 @@ Constraints:
 import numpy as np
 import cvxpy as cp
 from scipy.linalg import solve_discrete_are
-#from dataclasses import dataclass
 import json
 
 
@@ -29,22 +32,23 @@ import json
 with open('configs/config_mpc.json') as f:
     cfg = json.load(f)
 
-Ts = cfg['Ts']  
-Tf = cfg['Tf']
+Ts  = cfg['Ts']  
+Tf  = cfg['Tf']
 A   = 0*np.array(cfg['A'])
 B   = 0*np.array(cfg['B'])
 Q   = np.diag(cfg['Q_diag'])
 R   = np.diag(cfg['R_diag'])
-P   = cfg['P_diag']  # may be 'dare' string or a list of diagonal values
-#x0  = np.array(cfg_mpc['x0'], dtype=float)
+P   = cfg['P_diag']  
 u0  = np.array(cfg['u0'], dtype=float)
 h   = cfg['h']
 m   = cfg['m']
-constraints = cfg['constraints']
-disturbance = cfg['disturbance']
-learning_rate = cfg['learning_rate']
-window_size = cfg['window_size']
-optimizer = cfg['optimizer']
+
+constraints     = cfg['constraints']
+disturbance     = cfg['disturbance']
+learning_rate   = cfg['learning_rate']
+window_size     = cfg['window_size']
+optimizer       = cfg['optimizer']
+
 update_parameters_rate = cfg['update_parameters_rate']
 
 # online modeller
@@ -52,16 +56,17 @@ class Modeller():
     
     def __init__(self):
 
-        self.A_hat = np.array(A, ndmin=2)
-        self.B_hat = np.array(B, ndmin=2)
-        self.nx = int(A.shape[0])
-        self.nu = int(B.shape[1])
-        self.window_size = int(window_size)         # window to collect data                # refit every this many steps
-        #self.A_hat = np.zeros((self.nx, self.nx))
-        #self.B_hat = np.zeros((self.nx, self.nu))
-        self.Phi = np.zeros((self.nx, self.nx + self.nu))  
-        self.learning_rate = learning_rate
-        self.optimizer = optimizer
+        self.A_hat  = np.array(A, ndmin=2)
+        self.B_hat  = np.array(B, ndmin=2)
+        self.nx     = int(A.shape[0])
+        self.nu     = int(B.shape[1])
+        
+        self.constraints = constraints
+        self.window_size    = int(window_size)        
+        self.Phi            = np.zeros((self.nx, self.nx + self.nu))  
+        self.learning_rate  = learning_rate
+        self.optimizer      = optimizer
+        
         self.update_parameters_rate = int(update_parameters_rate) 
         self.update_parameters_count = 0
 
@@ -73,28 +78,32 @@ class Modeller():
         self.scale_dx = np.ones((self.nx, 1))
 
         self.viable = False
-        self.shared = False
 
         self.Ts = Ts
-        self.constraints = constraints
         self.u0 = u0
 
     def excite(self, plant, x, state_history, input_history):
 
-        model_log = open('model_log.txt', 'w')
-        model_log.write('step,A_hat,B_hat\n') # headers
+        # initiate logs
+        model_log = open('logs/model_log.txt', 'w')
+        model_log.write('step,A_hat,B_hat\n') 
 
+        # bounds
         u_max          = np.array(self.constraints['u_max'])
         u_min          = np.array(self.constraints['u_min'])
-        excite_hold    = 0.2                                   # seconds to hold each random input
-        excite_hold_steps = int(excite_hold / self.Ts)               # steps per hold
-        excite_max_steps  = int(15 / self.Ts)                       # max excitation duration (seconds)
-        rng = np.random.default_rng(seed=42)
-        found_stable_model = False
-        k = 0
-        u_exc = np.zeros_like(u_min)    # will be set on first transition
-        excite_count = excite_hold_steps # trigger immediate draw on first step
-        rockback = False
+
+        # excitation parameters
+        excite_hold         = 0.2                       # seconds to hold each random input
+        excite_time         = 15
+        excite_hold_steps   = int(excite_hold / self.Ts)              
+        excite_max_steps    = int(excite_time / self.Ts) # excitation duration 
+        
+        # initialize excitation 
+        rng             = np.random.default_rng(seed=42)
+        u_exc           = np.zeros_like(u_min)    # random input 
+        excite_count    = excite_hold_steps       # trigger switch immediately 
+        rockback        = False                   # set to False initially, avoids biasing the model in one direction
+        k               = 0
 
         while k < excite_max_steps:
 
@@ -108,11 +117,17 @@ class Modeller():
                 rockback = False
             excite_count += 1
 
+            # update the model
             self.update(x, u_exc)
+
+            # evolve the plant
             x = plant.evolve(x, u_exc, disturb = False)
                     
+            # store
             state_history.append(x.copy())
             input_history.append(u_exc.copy())
+
+            #print to log
             model_log.write(f'exc_{k + 1},{self.A_hat.tolist()},{self.B_hat.tolist()}\n')
             
             k += 1
@@ -120,8 +135,6 @@ class Modeller():
         model_log.close()
         
         return x, state_history, input_history
-
-
 
 
     def update(self, x, u):
@@ -134,6 +147,7 @@ class Modeller():
             self.do_fit = True
         else:
             self.do_fit = False
+    
     # accumulate data over window 
     def accumulate_data(self, x, u):
 
@@ -143,63 +157,62 @@ class Modeller():
         self.X[:, -1] = x.flatten()
         self.U[:, -1] = u.flatten()
 
-    # fit x(k+1) = Ix(k) + A_tilde*x(k) + B*u(k) + Bd
-    # equivalently: dx = x(k+1) - x(k) = A_tilde*x(k) + B*u(k) + bias
+    # fit the residuals: dx = x(k+1) - x(k) = A_tilde*x(k) + B*u(k) + bias               
     def fit(self):
 
         if self.optimizer == 'least_squares':
 
+            # pull out states and inputs from the window
             X_curr = self.X[:, :-1]
             U_curr = self.U[:, :-1]
             X_next = self.X[:, 1:]
             N = X_curr.shape[1]
 
-            # factor out identity: regress on the residual
-            dX = X_next - X_curr                                                # (nx, N)
+            # factor out identity
+            dX = X_next - X_curr                                                
 
-            # per-feature scale factors (std over window, floored to avoid divide-by-zero)
-            self.scale_x  = np.maximum(np.std(X_curr, axis=1, keepdims=True), 1e-8)  # (nx, 1)
-            self.scale_u  = np.maximum(np.std(U_curr, axis=1, keepdims=True), 1e-8)  # (nu, 1)
-            self.scale_dx = np.maximum(np.std(dX,     axis=1, keepdims=True), 1e-8)  # (nx, 1)
+            # scales (per feature) for normalization 
+            self.scale_x  = np.maximum(np.std(X_curr, axis=1, keepdims=True), 1e-8)  
+            self.scale_u  = np.maximum(np.std(U_curr, axis=1, keepdims=True), 1e-8)  
+            self.scale_dx = np.maximum(np.std(dX,     axis=1, keepdims=True), 1e-8)  
 
             # normalize
             X_n  = X_curr / self.scale_x
             U_n  = U_curr / self.scale_u
             dX_n = dX     / self.scale_dx
 
-            # stack normalized regressor with bias column (absorbs Bd in normalized space)
+            # stack 
             Z_n = np.vstack([X_n, U_n, np.ones((1, N))])
 
-            # least squares in normalized space: dX_n ≈ Phi_n * Z_n
+            # solve dX_n ≈ Phi_n * Z_n using least squares (normalized)
             Phi_n, _, _, _ = np.linalg.lstsq(Z_n.T, dX_n.T, rcond=None)
-            Phi_n = Phi_n.T                                                     # (nx, nx+nu+1)
+            Phi_n = Phi_n.T                                                     
 
-            # un-normalize: A_tilde = diag(scale_dx) @ Phi_n[:, :nx] @ diag(1/scale_x)
+            # un-normalize
             S_dx = np.diag(self.scale_dx.flatten())
-            A_tilde = S_dx @ Phi_n[:, :self.nx]          @ np.diag(1.0 / self.scale_x.flatten())
+            A_tilde = S_dx @ Phi_n[:, :self.nx] @ np.diag(1.0 / self.scale_x.flatten())
             B_new   = S_dx @ Phi_n[:, self.nx:self.nx+self.nu] @ np.diag(1.0 / self.scale_u.flatten())
 
-            # recover A_hat by adding back the identity
+            # add back the identity
             A_new = np.eye(self.nx) + A_tilde
 
+            # apply to model using learning rate
             self.A_hat = (1-self.learning_rate) * self.A_hat + self.learning_rate * A_new
             self.B_hat = (1-self.learning_rate) * self.B_hat + self.learning_rate * B_new
 
-            # mark as stable and controllable when both conditions hold
+            # check stability 
             is_stable = np.all(np.abs(np.linalg.eigvals(self.A_hat)) < 1.1)
 
-            # controllability matrix [B | AB | A^2 B | ... | A^(nx-1) B]
-            C = np.hstack([np.linalg.matrix_power(self.A_hat, i) @ self.B_hat
-                           for i in range(self.nx)])
+            # check controllability
+            C = np.hstack([np.linalg.matrix_power(self.A_hat, i) @ self.B_hat for i in range(self.nx)])
             is_controllable = np.linalg.matrix_rank(C) == self.nx
 
+            # if both stable and controllable, consider viable
             if is_stable and is_controllable:
                 self.viable = True
                 print('stable and controllable model found')
             else:
                 self.viable = False
-
-            self.shared = False
 
         else:
             raise ValueError(f"Unknown optimizer: {self.optimizer}")

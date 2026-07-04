@@ -11,7 +11,6 @@ constraints = cfg['constraints']
 d   = np.array(cfg['d'])
 x0  = np.array(cfg['x0'], dtype=float)
 
-
 class Plant:
 
     def __init__(self):
@@ -32,6 +31,5 @@ class Plant:
         #softener = 1
         #x_next[2] = np.clip(x_next[2], softener*constraints['x_min'][2], softener*constraints['x_max'][2])
         #x_next[3] = np.clip(x_next[3], softener*constraints['x_min'][3], softener*constraints['x_max'][3])
-
 
         return x_next

@@ -1,6 +1,6 @@
 '''
 
-This mostly module vibe-coded using Claude Sonnet 4.6
+This module mostly vibe-coded using Claude Sonnet 4.6
 
 Minor refinements made by author: tjards
 
