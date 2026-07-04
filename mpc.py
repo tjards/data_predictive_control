@@ -21,23 +21,36 @@ Constraints:
 import numpy as np
 import cvxpy as cp
 from scipy.linalg import solve_discrete_are
-from dataclasses import dataclass
+#from dataclasses import dataclass
+import json
 
-# interface for passing MPC parameters
-'''
-@dataclass
-class MPCParameters():
-    A: np.ndarray
-    B: np.ndarray
-    Q: np.ndarray
-    R: np.ndarray
-    P: np.ndarray
-'''
+
+# load parameters from config
+with open('configs/config_mpc.json') as f:
+    cfg = json.load(f)
+
+Ts = cfg['Ts']  
+Tf = cfg['Tf']
+A   = 0*np.array(cfg['A'])
+B   = 0*np.array(cfg['B'])
+Q   = np.diag(cfg['Q_diag'])
+R   = np.diag(cfg['R_diag'])
+P   = cfg['P_diag']  # may be 'dare' string or a list of diagonal values
+#x0  = np.array(cfg_mpc['x0'], dtype=float)
+u0  = np.array(cfg['u0'], dtype=float)
+h   = cfg['h']
+m   = cfg['m']
+constraints = cfg['constraints']
+disturbance = cfg['disturbance']
+learning_rate = cfg['learning_rate']
+window_size = cfg['window_size']
+optimizer = cfg['optimizer']
+update_parameters_rate = cfg['update_parameters_rate']
 
 # online modeller
 class Modeller():
     
-    def __init__(self, A, B, learning_rate = 0.1, window_size=40, optimizer = 'least_squares', update_parameters_rate=10):
+    def __init__(self):
 
         self.A_hat = np.array(A, ndmin=2)
         self.B_hat = np.array(B, ndmin=2)
@@ -61,6 +74,55 @@ class Modeller():
 
         self.viable = False
         self.shared = False
+
+        self.Ts = Ts
+        self.constraints = constraints
+        self.u0 = u0
+
+    def excite(self, plant, x, state_history, input_history):
+
+        model_log = open('model_log.txt', 'w')
+        model_log.write('step,A_hat,B_hat\n') # headers
+
+        u_max          = np.array(self.constraints['u_max'])
+        u_min          = np.array(self.constraints['u_min'])
+        excite_hold    = 0.2                                   # seconds to hold each random input
+        excite_hold_steps = int(excite_hold / self.Ts)               # steps per hold
+        excite_max_steps  = int(15 / self.Ts)                       # max excitation duration (seconds)
+        rng = np.random.default_rng(seed=42)
+        found_stable_model = False
+        k = 0
+        u_exc = np.zeros_like(u_min)    # will be set on first transition
+        excite_count = excite_hold_steps # trigger immediate draw on first step
+        rockback = False
+
+        while k < excite_max_steps:
+
+            if excite_count >= excite_hold_steps and not rockback:
+                excite_count = 0
+                u_exc = rng.uniform(u_min, u_max)
+                rockback = True
+            elif excite_count >= excite_hold_steps and rockback:
+                excite_count = 0
+                u_exc = -u_exc
+                rockback = False
+            excite_count += 1
+
+            self.update(x, u_exc)
+            x = plant.evolve(x, u_exc, disturb = False)
+                    
+            state_history.append(x.copy())
+            input_history.append(u_exc.copy())
+            model_log.write(f'exc_{k + 1},{self.A_hat.tolist()},{self.B_hat.tolist()}\n')
+            
+            k += 1
+
+        model_log.close()
+        
+        return x, state_history, input_history
+
+
+
 
     def update(self, x, u):
 
@@ -145,7 +207,7 @@ class Modeller():
 # controller
 class MPC():
 
-    def __init__(self, A, B, Q, R, P, x0, u0, h, m, constraints, disturbance=False):
+    def __init__(self, x0):
 
         # store the attributes passed in 
         self.A = np.array(A, ndmin=2)           # state matrix  
@@ -167,6 +229,8 @@ class MPC():
         self.nu = self.B.shape[1]               # input dimensions
         self.constraints = constraints
         self.disturbance = disturbance
+        self.Ts = Ts
+        self.Tf = Tf
 
         # we can do disturbance rejection
         if self.disturbance:

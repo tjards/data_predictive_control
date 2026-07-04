@@ -10,6 +10,7 @@ Minor refinements made by author: tjards
 import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib.animation as animation
+import json
 
 
 # helper function for contour plotting

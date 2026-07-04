@@ -16,11 +16,9 @@
     "Q_diag": [0.1, 0.1, 0.1, 0.1],
     "R_diag": [0.01, 0.01],
     "P_diag": "dare",
-    "x0": [-1, 1, 0, 0],
     "u0": [0, 0],
     "h": 20,
     "m": 5,
-    "d": [1.4,-2.3],
     "disturbance": true,
     "constraints": {
         "type": "box",
@@ -28,5 +26,11 @@
         "x_max": [5, 5, 1, 1],
         "u_min": [-5, -5],
         "u_max": [5, 5]
-    }
+    },
+    "learning_rate": 0.3,
+    "window_size": 20,
+    "optimizer": "least_squares",
+    "update_parameters_rate": 20
 }
+
+

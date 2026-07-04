@@ -1,169 +1,91 @@
-
 # standard inputs
-from cffi import model
 import numpy as np
 import json
 from scipy.linalg import solve_discrete_are
 
 # custom imports
+import plant  
 import mpc 
 import visualization.plot as plot
-import plant    # simulates actual plant dynamics
-
+  
 # ------------------------------------------------------------------
-# Setup
+# Model dynamics by exciting plant modes
 # ------------------------------------------------------------------
 
-# load parameters from config
-with open('config_mpc.json') as f:
-    cfg = json.load(f)
+# initialize the plant
+plant = plant.Plant()
+x = plant.x0.copy()
 
-Ts = cfg['Ts']  
-Tf = cfg['Tf']
-A   = np.array(cfg['A'])
-B   = np.array(cfg['B'])
-Q   = np.diag(cfg['Q_diag'])
-R   = np.diag(cfg['R_diag'])
-P   = cfg['P_diag']  # may be 'dare' string or a list of diagonal values
-x0  = np.array(cfg['x0'], dtype=float)
-u0  = np.array(cfg['u0'], dtype=float)
-h   = cfg['h']
-m   = cfg['m']
-constraints = cfg['constraints']
-disturbance = cfg['disturbance'] 
+# initialize modeller 
+modeller = mpc.Modeller()
 
-# initialize the MPC controller
-controller = mpc.MPC(A, B, Q, R, P, x0, u0, h, m, constraints, disturbance)
-
-# initialize plant modeller 
-modeller = mpc.Modeller(0*A, 0*B, learning_rate=0.1, window_size=10, optimizer = 'least_squares', update_parameters_rate=20)
-
-# initial state and storage
-x = x0.copy()
-u = u0.copy()
-state_history       = [x.copy()]
-predicted_sequences = []
-input_history       = []
-
-# //DEBUG//: open log file for model estimates
-model_log = open('model_log.txt', 'w')
-model_log.write('step,A_hat,B_hat\n') # headers
-
-# ------------------------------------------------------------------
-# Modelling phase: random step inputs (ZOH) to excite system modes
-# before handing off to MPC
-# ------------------------------------------------------------------
-u_max          = 0.5*np.array(constraints['u_max'])
-u_min          = 0.5*np.array(constraints['u_min'])
-excite_hold    = 0.2                                    # seconds to hold each random input
-excite_hold_steps = int(excite_hold / Ts)               # steps per hold
-excite_max_steps  = int(120 / Ts)                       # max excitation duration (seconds)
-
-print(f"Modelling phase: up to {excite_max_steps} steps ({excite_hold_steps} steps/hold)")
-
-rng = np.random.default_rng(seed=42)
-found_stable_model = False
-k = 0
-u_exc = rng.uniform(u_min, u_max)                       # initial random input
-while k < excite_max_steps:
-    # draw a new random input every excite_hold_steps
-    if k % excite_hold_steps == 0:
-        u_exc = rng.uniform(u_min, u_max)
-    modeller.update(x, u_exc)
-    x = plant.evolve(x, u_exc)
-    state_history.append(x.copy())
-    input_history.append(u_exc.copy())
-    model_log.write(f'exc_{k + 1},{modeller.A_hat.tolist()},{modeller.B_hat.tolist()}\n')
-    if modeller.viable and not modeller.shared:
-        found_stable_model = True
-        controller.A = modeller.A_hat
-        controller.B = modeller.B_hat
-        controller.update_internal_parameters()
-        modeller.shared = True
-    k += 1
-
-model_log.close()
+print(f"Exciting the plant modes for modelling...")
+x, excite_state_history, excite_input_history = modeller.excite(plant, x, [], [])
 print(f"Modelling complete. Model viable: {modeller.viable}")
 
-# preserve excitation history for visualization
-keep_excitation_history = False
-if keep_excitation_history:
-    excite_state_history = state_history.copy()
-    excite_input_history = input_history.copy()
-else:
-    excite_state_history = []
-    excite_input_history = []
+# ------------------------------------------------------------------
+# Run the Controller 
+# ------------------------------------------------------------------
 
+# initialize the MPC controller
+controller = mpc.MPC(x)
 
-# reset state to x0 — excitation was for identification only, MPC starts fresh
-x = x0.copy()
+# load the model parameters into the controller
+controller.A = modeller.A_hat
+controller.B = modeller.B_hat
+controller.update_internal_parameters()
+
+# initialize storage 
 state_history = [x.copy()]
 input_history = []
+predicted_sequences = []
 
-# ------------------------------------------------------------------
-# Controller phase: run MPC with online model updates
-# ------------------------------------------------------------------
+# initialize the control input
+u = controller.u0
 
-for k in range(int(Tf / Ts)):
+for k in range(int(controller.Tf / controller.Ts)):
 
     # run controller
     controller.solve(x, u)
 
     # store predicted sequence 
-    predicted_sequences.append(controller.result_state_sequence.reshape(h, controller.nx).copy())
+    predicted_sequences.append(controller.result_state_sequence.reshape(controller.h, controller.nx).copy())
 
     # apply first control input and advance state
     u = controller.result_control_next.flatten()
     input_history.append(u.copy())
-
-    # now done above
-    '''
-    # update model with current state and input (before evolving)
-    modeller.update(x, u)
-
-    # //DEBUG//:
-    model_log.write(f'{k},{modeller.A_hat.tolist()},{modeller.B_hat.tolist()}\n')
-    '''
 
     x = plant.evolve(x, u)
 
     # store actual state
     state_history.append(x.copy())
 
-    # now done above
-    '''
-    if modeller.viable and not modeller.shared:
-        controller.A = modeller.A_hat
-        controller.B = modeller.B_hat
-        controller.update_internal_parameters()
-        modeller.shared = True
-    '''
+print(f"Simulation complete: {len(state_history) - 1} steps")
+print(f"Final state distance from goal: {np.linalg.norm(x):.4f}")
 
-
-    if np.linalg.norm(x) < 1e-3:
-        print(f"Converged at step {k + 1}")
-        break
-
-print(f"Simulation complete: {len(state_history) - 1} steps, "
-      f"final state distance from goal: {np.linalg.norm(x):.4f}")
-
-#//DEBUG//:
-'''
-model_log.close()
-'''
 
 # ------------------------------------------------------------------
 # Visualizations
 # ------------------------------------------------------------------
-# combine excitation + MPC histories for full-trajectory plots
-full_state_history = excite_state_history + state_history[1:]  # avoid duplicate x0
-full_input_history = excite_input_history + input_history
-# predicted_sequences only covers MPC phase (no predictions during excitation)
+keep_excitation_history = True
+if keep_excitation_history:
+    full_state_history = excite_state_history + state_history[1:]  # avoid duplicate x0
+    full_input_history = excite_input_history + input_history
+else:
+    full_state_history = state_history
+    full_input_history = input_history
+
 excite_predicted = [None] * len(excite_input_history)
 
-plot.animate_trajectory(full_state_history, excite_predicted + predicted_sequences, solve_discrete_are(A, B, Q, R),
-                        filename='visualization/animations/trajectory.gif')
-plot.plot_inputs(full_input_history, constraints, filename='visualization/plots/inputs.png')
-plot.plot_velocities(full_state_history, constraints, filename='visualization/plots/velocities.png')
+with open('configs/config_visualization.json') as f:
+    cfg = json.load(f)
+
+animate_path = cfg['animate_path']
+plot_inputs_path = cfg['plot_inputs_path']
+plot_velocities_path = cfg['plot_velocities_path']
+
+plot.animate_trajectory(full_state_history, excite_predicted + predicted_sequences, solve_discrete_are(controller.A, controller.B, controller.Q, controller.R),filename=animate_path)
+plot.plot_inputs(full_input_history, controller.constraints, filename=plot_inputs_path)
+plot.plot_velocities(full_state_history, controller.constraints, filename=plot_velocities_path)
 
 
