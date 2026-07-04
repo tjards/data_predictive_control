@@ -1,70 +1,125 @@
-## Windy MPC
 
-The project implements Convex Model Predictive Control (MPC) with online disturbance modelling and rejection for application in windy conditions. We use [cvxpy](https://www.cvxpy.org/) for solving the convex optimization online. 
+# Convex Data-driven Predictive Control (DPC) 
 
-### Dynamics
+A convex data-driven predictive control (DPC) framework for systems operating in biased conditions such as wind. System matrices are identified online from input-output data, disturbances are estimated from prediction residuals, and [cvxpy](https://www.cvxpy.org/) solves the resulting convex optimization at each step.
 
-Let us consider a system described by the following discrete linear state space at time step $k$:
+## Formulation
 
-$$x(k+1) = A x(k) + B\bigl(u(k) + d\bigr)$$
+At each time step $k$, the following problem is solved over prediction horizon $h$:
 
-where $A$ is the system matrix, $B$ is the input matrix, $x$ is the state vector, $u$ is the control input vector, and $d$ is an unknown, slowly-varying disturbance.
+$$\min_{U} \; J = \sum_{i=0}^{h-1} \Bigl[ x(k{+}i)^\top Q\, x(k{+}i) + u(k{+}i)^\top R\, u(k{+}i) \Bigr] + x(k{+}h)^\top P\, x(k{+}h)$$
 
-### Objective
+subject to:
 
-At each time step $k$, the controller solves the following convex optimization problem over a prediction horizon $h$:
+$$x(k{+}i{+}1) = \hat{A}\,x(k{+}i) + \hat{B}\bigl(u(k{+}i) + \hat{d}(k)\bigr), \quad i = 0,\ldots,h{-}1$$
 
-$$\min_{u} \; J = \sum_{i=0}^{h-1} \Bigl[ x(k{+}i)^\top Q\, x(k{+}i) + u(k{+}i)^\top R\, u(k{+}i) \Bigr] + x(k{+}h)^\top P\, x(k{+}h)$$
+$$x_{\min} \leq x(k{+}i) \leq x_{\max}, \quad i = 1,\ldots,h$$
 
-subject to the dynamics above and constraints:
+$$u_{\min} \leq u(k{+}i) \leq u_{\max}, \quad i = 0,\ldots,h{-}1$$
 
-$$x_{\min} \leq x(k+i) \leq x_{\max}, \quad \forall\, i = 1, \ldots, h$$
-$$u_{\min} \leq u(k+i) \leq u_{\max}, \quad \forall\, i = 0, \ldots, h-1$$
+where $Q \succeq 0$, $R \succ 0$, and $P \succeq 0$ are state, input, and terminal cost weights ($P$ is the solution to the [Discrete Algebraic Riccati Equation](https://docs.scipy.org/doc/scipy/reference/generated/scipy.linalg.solve_discrete_are.html)). The three data-driven quantities are updated online at every step:
 
-where $Q \succeq 0$ weighs the state cost, $R \succ 0$ weighs the input cost, and $P \succeq 0$ is the terminal cost (nominally computed as the solution to the [Discrete Algebraic Riccati Equation](https://docs.scipy.org/doc/scipy/reference/generated/scipy.linalg.solve_discrete_are.html)).
+**Model** — $\hat{A},\hat{B}$ are identified from a sliding window of $N$ input-output pairs via least-squares (see [Data-driven Modelling](#data-driven-modelling)):
 
-### Wind Modelling and Rejection
+$$[\hat{A},\,\hat{B},\,\hat{c}] = \arg\min \sum_{j=1}^{N} \bigl\| x(j{+}1) - \hat{A}\,x(j) - \hat{B}\,u(j) - \hat{c} \bigr\|^2$$
 
-We treat wind as an unknown disturbance $d$, estimated online from prediction error as follows:
+**Disturbance** — $\hat{d}$ is inferred from the one-step prediction residual via the Moore-Penrose pseudoinverse $\hat{B}^\dagger$ (see [Bias Rejection](#bias-rejection)):
 
-$$\hat{d}(k) = B^\dagger \Bigl[ x(k) - A\,x(k{-}1) - B\,u(k{-}1) \Bigr]$$
+$$\hat{d}(k) = \hat{B}^{\dagger} \Bigl[ x(k) - \hat{A}\,x(k{-}1) - \hat{B}\,u(k{-}1) \Bigr]$$
 
-where $B^\dagger$ is the [Moore-Penrose pseudoinverse](https://numpy.org/doc/stable/reference/generated/numpy.linalg.lstsq.html) of $B$. This estimate $\hat{d}$ is fed forward into the predicted state sequence during optimization:
+**Stacked prediction** — the dynamics are lifted over the full horizon for the optimizer:
 
-$$X_{\text{pred}} = \mathcal{A}\, x(k) + \mathcal{B}\, U + \mathcal{D}\, \hat{d}$$
+$$X_{\text{pred}} = \hat{\mathcal{A}}\,x(k) + \hat{\mathcal{B}}\,U + \hat{\mathcal{D}}\,\hat{d}$$
 
-where $\mathcal{A}$, $\mathcal{B}$, and $\mathcal{D}$ are the system matrices augmented over $h$.
+where $\hat{\mathcal{A}} \in \mathbb{R}^{h n_x \times n_x}$, $\hat{\mathcal{B}} \in \mathbb{R}^{h n_x \times h n_u}$, $\hat{\mathcal{D}} \in \mathbb{R}^{h n_x \times n_u}$, and $U = [u(k)^\top, \ldots, u(k{+}h{-}1)^\top]^\top$.
 
-## Results
+The MPC engages only once $(\hat{A},\hat{B})$ satisfies stability (spectral radius $< 1.1$) and full controllability ($\text{rank}[\hat{B},\,\hat{A}\hat{B},\,\ldots,\,\hat{A}^{n_x-1}\hat{B}] = n_x$).
 
-Below demonstrates the performance of the MPC without and with wind rejection. Wind is simulated as a constant unknown input offset and modelled online using the method described above.
+## Data-driven Modelling
+
+The plant is modelled as $x(k{+}1) = \hat{A}\,x(k) + \hat{B}\,u(k) + \hat{c}$, with $\hat{A}$ and $\hat{B}$ estimated online.
+
+### Excitation
+
+The plant is first excited with zero-mean random bounded inputs: each input drawn uniformly from $[u_{\min}, u_{\max}]$ is immediately followed by its negation (a *rockback* step). Trajectories are stored in a sliding window of length $N$.
+
+### Residual (delta-x) Formulation
+
+Only the *state increment* is regressed, rather than the full next state:
+
+$$\Delta x(k) = x(k{+}1) - x(k) = \tilde{A}\,x(k) + \hat{B}\,u(k)$$
+
+This improves conditioning since $\Delta x$ is typically small relative to $x$. The full matrix is recovered as $\hat{A} = I + \tilde{A}$.
+
+### Internal Batch Normalization
+
+Each batch is normalized by per-feature standard deviations from the current window before fitting:
+
+$$x_n = \frac{x}{\sigma_x}, \quad u_n = \frac{u}{\sigma_u}, \quad \Delta x_n = \frac{\Delta x}{\sigma_{\Delta x}}$$
+
+### Least Squares Fit
+
+A stacked regressor with a bias column is formed:
+
+$$Z_n = \begin{bmatrix} X_n \\ U_n \\ \mathbf{1}^\top \end{bmatrix} \in \mathbb{R}^{(n_x + n_u + 1) \times N}$$
+
+$\Phi_n$ is found by solving $\Delta X_n \approx \Phi_n Z_n$ via [numpy least squares](https://numpy.org/doc/stable/reference/generated/numpy.linalg.lstsq.html), then un-normalized:
+
+$$\tilde{A} = \text{diag}(\sigma_{\Delta x})\;\Phi_n^{(x)}\;\text{diag}(\sigma_x^{-1}), \qquad \hat{B}_{\text{new}} = \text{diag}(\sigma_{\Delta x})\;\Phi_n^{(u)}\;\text{diag}(\sigma_u^{-1})$$
+
+### Exponential Smoothing Update
+
+New estimates are blended into the running model with learning rate $\alpha \in (0,1]$:
+
+$$\hat{A} \leftarrow (1-\alpha)\,\hat{A} + \alpha\,(I + \tilde{A}), \qquad \hat{B} \leftarrow (1-\alpha)\,\hat{B} + \alpha\,\hat{B}_{\text{new}}$$
+
+### Results
+
+The animation shows the excitation phase followed by the controlled trajectory once the model passes the viability checks stated in [Formulation](#formulation).
+
+![Modeller excitation and convergence](docs/modeller/trajectory.gif)
+
+| Control Inputs | Velocity States |
+|:---:|:---:|
+| ![Control inputs within bounds](docs/modeller/inputs.png) | ![Velocity states within bounds](docs/modeller/velocities.png) |
+
+
+## Bias Rejection
+
+Wind is treated as an unknown slowly-varying disturbance $d$ entering through the input channel:
+
+$$x(k+1) = \hat{A}\,x(k) + \hat{B}\bigl(u(k) + d\bigr)$$
+
+At each step, $\hat{d}$ is estimated from the one-step prediction residual via $\hat{B}^\dagger$ (as shown in [Formulation](#formulation)) and fed forward into the stacked prediction used by the optimizer.
+
+### Results
 
 | Without Disturbance Rejection | With Disturbance Rejection |
 |:---:|:---:|
-| ![Trajectory without disturbance rejection](docs/trajectory_withoutdist.gif) | ![Trajectory with disturbance rejection](docs/trajectory_withdist.gif) |
+| ![Trajectory without disturbance rejection](docs/windy/trajectory_withoutdist.gif) | ![Trajectory with disturbance rejection](docs/windy/trajectory_withdist.gif) |
 
-Without wind rejection, the controller cannot compensate, causing the trajectory to deviate from the origin. With wind rejection, the estimated disturbance is compensated for in the predictions, resulting in smooth convergence to the origin.
+Without rejection the trajectory drifts from the origin; with rejection the estimated disturbance is cancelled in the predictions, restoring convergence.
 
-The MPC also enforces hard constraints on both the control inputs and the velocity states throughout the simulation.
+| Control Inputs | Velocity States |
+|:---:|:---:|
+| ![Control inputs within bounds](docs/windy/inputs_withoutdist.png) | ![Velocity states within bounds](docs/windy/velocities_withoutdist.png) |
 
-![Control inputs within bounds](docs/inputs_withoutdist.png)
 
-![Velocity states within bounds](docs/velocities_withoutdist.png)
 
 ## Use
 
-Install dependencies from the requirements file provided and run the simulation:
+Install dependencies and run:
 
 ```bash
 pip install -r requirements.txt
 python main.py
 ```
- 
-Parameters are configured in `config.json`. 
+
+Parameters are configured in `configs/`.
 
 ## References
 
 - Parts of this project were developed with the assistance of Claude Sonnet 4.6
 - Solving the optimization: [cvxpy](https://www.cvxpy.org/)
-- Solving for P using Discrete Algebraic Riccati Equation: [scipy.linalg.solve_discrete_are](https://docs.scipy.org/doc/scipy/reference/generated/scipy.linalg.solve_discrete_are.html)
-- Using Moore-Penrose pseudoinverse to solve for disturbance: [numpy.linalg.lstsq](https://numpy.org/doc/stable/reference/generated/numpy.linalg.lstsq.html) 
+- Terminal cost via Discrete Algebraic Riccati Equation: [scipy.linalg.solve_discrete_are](https://docs.scipy.org/doc/scipy/reference/generated/scipy.linalg.solve_discrete_are.html)
+- Disturbance estimation via Moore-Penrose pseudoinverse: [numpy.linalg.lstsq](https://numpy.org/doc/stable/reference/generated/numpy.linalg.lstsq.html) 

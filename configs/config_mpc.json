@@ -18,7 +18,7 @@
     "P_diag": "dare",
     "u0": [0, 0],
     "h": 20,
-    "m": 5,
+    "m": 2,
     "disturbance": true,
     "constraints": {
         "type": "box",
@@ -30,7 +30,8 @@
     "learning_rate": 0.3,
     "window_size": 20,
     "optimizer": "least_squares",
-    "update_parameters_rate": 20
+    "update_parameters_rate": 20,
+    "random_seed": 42
 }
 
 

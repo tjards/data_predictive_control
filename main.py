@@ -4,7 +4,7 @@ import json
 from scipy.linalg import solve_discrete_are
 
 # custom imports
-import plant  
+import plant as le_plant 
 import mpc 
 import visualization.plot as plot
   
@@ -13,7 +13,7 @@ import visualization.plot as plot
 # ------------------------------------------------------------------
 
 # initialize the plant
-plant = plant.Plant()
+plant = le_plant.Plant()
 x = plant.x0.copy()
 
 # initialize modeller 
@@ -27,13 +27,18 @@ print(f"Modelling complete. Model viable: {modeller.viable}")
 # Run the Controller 
 # ------------------------------------------------------------------
 
+# note: add a feasibility check out to necessary horizon
+
 # initialize the MPC controller
 controller = mpc.MPC(x)
 
 # load the model parameters into the controller
 controller.A = modeller.A_hat
 controller.B = modeller.B_hat
-controller.update_internal_parameters()
+controller.new_model_parameters = True
+
+# check feasibility of the current state and input
+controller.confirm_feasibility(x, controller.u0)
 
 # initialize storage 
 state_history = [x.copy()]

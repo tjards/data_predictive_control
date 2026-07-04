@@ -1,19 +1,20 @@
 import numpy as np
 import json
 
-# load parameters from config
-with open('configs/config_plant.json') as f:
-    cfg = json.load(f)
-
-A   = np.array(cfg['A'])
-B   = np.array(cfg['B'])
-constraints = cfg['constraints']
-d   = np.array(cfg['d'])
-x0  = np.array(cfg['x0'], dtype=float)
-
 class Plant:
 
     def __init__(self):
+
+        # load parameters from config
+        with open('configs/config_plant.json') as f:
+            cfg = json.load(f)
+
+        A   = np.array(cfg['A'])
+        B   = np.array(cfg['B'])
+        constraints = cfg['constraints']
+        d   = np.array(cfg['d'])
+        x0  = np.array(cfg['x0'], dtype=float)
+
         self.A = A
         self.B = B
         self.constraints = constraints

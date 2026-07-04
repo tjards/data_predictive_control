@@ -28,34 +28,27 @@ from scipy.linalg import solve_discrete_are
 import json
 
 
-# load parameters from config
-with open('configs/config_mpc.json') as f:
-    cfg = json.load(f)
-
-Ts  = cfg['Ts']  
-Tf  = cfg['Tf']
-A   = 0*np.array(cfg['A'])
-B   = 0*np.array(cfg['B'])
-Q   = np.diag(cfg['Q_diag'])
-R   = np.diag(cfg['R_diag'])
-P   = cfg['P_diag']  
-u0  = np.array(cfg['u0'], dtype=float)
-h   = cfg['h']
-m   = cfg['m']
-
-constraints     = cfg['constraints']
-disturbance     = cfg['disturbance']
-learning_rate   = cfg['learning_rate']
-window_size     = cfg['window_size']
-optimizer       = cfg['optimizer']
-
-update_parameters_rate = cfg['update_parameters_rate']
-
 # online modeller
 class Modeller():
     
     def __init__(self):
 
+        with open('configs/config_mpc.json') as f:
+            cfg = json.load(f)
+
+        # pull out stuff
+        Ts  = cfg['Ts']  
+        A   = 0*np.array(cfg['A'])
+        B   = 0*np.array(cfg['B'])  
+        u0  = np.array(cfg['u0'], dtype=float)
+        constraints     = cfg['constraints']
+        learning_rate   = cfg['learning_rate']
+        window_size     = cfg['window_size']
+        optimizer       = cfg['optimizer']
+        random_seed     = cfg['random_seed']
+        update_parameters_rate = cfg['update_parameters_rate']
+
+        # assign 
         self.A_hat  = np.array(A, ndmin=2)
         self.B_hat  = np.array(B, ndmin=2)
         self.nx     = int(A.shape[0])
@@ -66,6 +59,7 @@ class Modeller():
         self.Phi            = np.zeros((self.nx, self.nx + self.nu))  
         self.learning_rate  = learning_rate
         self.optimizer      = optimizer
+        self.random_seed    = random_seed
         
         self.update_parameters_rate = int(update_parameters_rate) 
         self.update_parameters_count = 0
@@ -84,58 +78,57 @@ class Modeller():
 
     def excite(self, plant, x, state_history, input_history):
 
-        # initiate logs
-        model_log = open('logs/model_log.txt', 'w')
-        model_log.write('step,A_hat,B_hat\n') 
-
         # bounds
         u_max          = np.array(self.constraints['u_max'])
         u_min          = np.array(self.constraints['u_min'])
 
         # excitation parameters
-        excite_hold         = 0.2                       # seconds to hold each random input
+        excite_hold         = 0.3                       # seconds to hold each random input
         excite_time         = 15
         excite_hold_steps   = int(excite_hold / self.Ts)              
         excite_max_steps    = int(excite_time / self.Ts) # excitation duration 
         
         # initialize excitation 
-        rng             = np.random.default_rng(seed=42)
+        rng             = np.random.default_rng(seed=self.random_seed)
         u_exc           = np.zeros_like(u_min)    # random input 
         excite_count    = excite_hold_steps       # trigger switch immediately 
         rockback        = False                   # set to False initially, avoids biasing the model in one direction
         k               = 0
 
-        while k < excite_max_steps:
+        # initialize log
+        with open('logs/model_log.txt', 'w') as model_log:
+            model_log.write('step,A_hat,B_hat\n')
 
-            if excite_count >= excite_hold_steps and not rockback:
-                excite_count = 0
-                u_exc = rng.uniform(u_min, u_max)
-                rockback = True
-            elif excite_count >= excite_hold_steps and rockback:
-                excite_count = 0
-                u_exc = -u_exc
-                rockback = False
-            excite_count += 1
+            # excite the modes of the plant for a while 
+            while k < excite_max_steps:
 
-            # update the model
-            self.update(x, u_exc)
+                # determine if rockback needed 
+                if excite_count >= excite_hold_steps and not rockback:
+                    excite_count = 0
+                    u_exc = rng.uniform(u_min, u_max)
+                    rockback = True
+                elif excite_count >= excite_hold_steps and rockback:
+                    excite_count = 0
+                    u_exc = -u_exc
+                    rockback = False
+                excite_count += 1
 
-            # evolve the plant
-            x = plant.evolve(x, u_exc, disturb = False)
-                    
-            # store
-            state_history.append(x.copy())
-            input_history.append(u_exc.copy())
+                # update the model
+                self.update(x, u_exc)
 
-            #print to log
-            model_log.write(f'exc_{k + 1},{self.A_hat.tolist()},{self.B_hat.tolist()}\n')
-            
-            k += 1
+                # evolve the plant
+                x = plant.evolve(x, u_exc, disturb = False)
+                        
+                # store
+                state_history.append(x.copy())
+                input_history.append(u_exc.copy())
 
-        model_log.close()
+                # log
+                model_log.write(f'exc_{k + 1},{self.A_hat.tolist()},{self.B_hat.tolist()}\n')
+                
+                k += 1
         
         return x, state_history, input_history
-
 
     def update(self, x, u):
 
@@ -144,10 +137,7 @@ class Modeller():
         if self.update_parameters_count >= self.update_parameters_rate:
             self.fit()
             self.update_parameters_count = 0
-            self.do_fit = True
-        else:
-            self.do_fit = False
-    
+
     # accumulate data over window 
     def accumulate_data(self, x, u):
 
@@ -201,7 +191,7 @@ class Modeller():
             self.B_hat = (1-self.learning_rate) * self.B_hat + self.learning_rate * B_new
 
             # check stability 
-            is_stable = np.all(np.abs(np.linalg.eigvals(self.A_hat)) < 1.1)
+            is_stable = np.all(np.abs(np.linalg.eigvals(self.A_hat)) <= 1.0)
 
             # check controllability
             C = np.hstack([np.linalg.matrix_power(self.A_hat, i) @ self.B_hat for i in range(self.nx)])
@@ -210,7 +200,7 @@ class Modeller():
             # if both stable and controllable, consider viable
             if is_stable and is_controllable:
                 self.viable = True
-                print('stable and controllable model found')
+                #print('stable and controllable model found')
             else:
                 self.viable = False
 
@@ -222,18 +212,37 @@ class MPC():
 
     def __init__(self, x0):
 
-        # store the attributes passed in 
+        with open('configs/config_mpc.json') as f:
+            cfg = json.load(f)
+
+        # pull out stuff
+        Ts  = cfg['Ts']  
+        Tf  = cfg['Tf']
+        A   = 0*np.array(cfg['A'])
+        B   = 0*np.array(cfg['B'])
+        Q   = np.diag(cfg['Q_diag'])
+        R   = np.diag(cfg['R_diag'])
+        P   = cfg['P_diag']  
+        u0  = np.array(cfg['u0'], dtype=float)
+        h   = cfg['h']
+        m   = cfg['m']
+        constraints     = cfg['constraints']
+        disturbance     = cfg['disturbance']
+
+        # assign
         self.A = np.array(A, ndmin=2)           # state matrix  
         self.B = np.array(B, ndmin=2)           # input matrix
         self.Q = np.array(Q, ndmin=2)           # state cost matrix
         self.R = np.array(R, ndmin=2)           # input cost matrix
-        
+        self.P_cfg = P                          # nominally 'dare', but takes hardcoded matrix        
+
         # we can compute terminal cost based on solution to Discrete Algebraic Riccati Equation
         if isinstance(P, str) and P.lower() == 'dare':
             self.P = solve_discrete_are(self.A, self.B, self.Q, self.R)  
         # or hardcoded
         else:
             self.P = np.array(P, ndmin=2)       # terminal
+
         self.x0 = np.array(x0).reshape(-1, 1)   # initial state
         self.u0 = np.array(u0).reshape(-1, 1)   # initial input
         self.h = h                              # prediction horizon
@@ -245,6 +254,11 @@ class MPC():
         self.Ts = Ts
         self.Tf = Tf
 
+        # for feasibility checks
+        self.h_max = 100
+        self.terminal_set_radius = 0.5
+        self.h_min_feasible = None
+
         # we can do disturbance rejection
         if self.disturbance:
             self.d_hat = np.zeros((self.nu, 1))  # estimated input disturbance
@@ -252,10 +266,80 @@ class MPC():
             self.u_prev = None                   # previous commanded input
         
         self.update_internal_parameters()  
+        self.new_model_parameters = False
+
+    # confirm feasible in h, if not, suggest h 
+    def confirm_feasibility(self, x0, u0):
+
+        x0 = np.array(x0).reshape(-1, 1)
+
+        print(f"Checking feasibility of h={self.h}")
+        print(f"Terminal region: {self.terminal_set_radius}")
+
+        # we'll be temporarily adjusting horizons, so store originals here
+        h_0      = self.h
+        m_0      = self.m
+        if self.disturbance:
+            x_prev_0 = self.x_prev
+            u_prev_0 = self.u_prev
+
+        try:
+            # incrementally increase h until feasible 
+            for h_trial in range(h_0, self.h_max + 1):
+
+                # set new horizons 
+                self.h = h_trial
+                self.m = min(m_0, h_trial)
+                self.new_model_parameters = True
+
+                # see if it solves
+                try:
+                    self.solve(x0, u0)
+                except RuntimeError:
+                    print(f"Horizon h={h_trial}: failed to solve, increasing horizon...")
+                    continue
+
+                # pull out the terminal state 
+                x_terminal = self.result_state_sequence[-self.nx:].reshape(-1, 1)
+                
+                # compute distance 
+                dist = float(np.linalg.norm(x_terminal))
+
+                # check distance against terminal set radius
+                if dist <= self.terminal_set_radius:
+                    if h_trial == h_0:
+                        print(f"Selected h={h_0} feasible.")
+                    else:
+                        print(f"Selected h={h_0} infeasible.")
+                        print(f"Suggest h={h_trial} with terminal distance {dist:.4f}.")
+                    self.h_min_feasible = h_trial
+                    return h_trial
+                else:
+                    if h_trial == h_0:
+                        print(f"Selected h={h_0} solves but doesn't reach terminal region. Increasing horizon...")
+                    else:
+                        print(f"...h={h_trial} doesn't reach terminal region, increasing farther...")
+
+            print(f"Terminal region not reachable within h_max={self.h_max}.")
+            return None
+
+        # i want to guarantee these are restored even if exceptions
+        finally:
+            # restore original horizons 
+            self.h = h_0
+            self.m = m_0
+            self.new_model_parameters = True
+            self.update_internal_parameters()
+            if self.disturbance:
+                self.x_prev = x_prev_0
+                self.u_prev = u_prev_0
 
     # allows for updated parameters
     def update_internal_parameters(self):
 
+        # recompute P if it's set to 'dare' (depends on A, B, Q, R)
+        if isinstance(self.P_cfg, str) and self.P_cfg.lower() == 'dare':
+            self.P = solve_discrete_are(self.A, self.B, self.Q, self.R)
         self._define_constraints()
         self._augment_matrices()
         self._construct_optimization_problem()
@@ -337,7 +421,7 @@ class MPC():
         
     def _construct_optimization_problem(self):
 
-        # define the optimization variables (optimized up to m, then will be frozen up to h)
+        # define the optimization variable (optimized up to m, then will be frozen up to h)
         self.opt_u = cp.Variable((self.nu * self.m, 1))
 
         # define full input sequence: opt_u up to m + frozen inputs 
@@ -347,27 +431,34 @@ class MPC():
         else:
             self.u_full = self.opt_u
 
-        # disturbance feedforward offset
+        # define initial state (updated at each solve)
+        self.x0_param = cp.Parameter((self.nx, 1), value=self.x0)
+
+        # define disturbance 
         if self.disturbance:
-            d_offset = self.D_aug @ self.d_hat
+            self.d_hat_param = cp.Parameter((self.nu, 1), value=self.d_hat)
+            d_offset = self.D_aug @ self.d_hat_param
         else:
             d_offset = np.zeros((self.nx * self.h, 1))
 
-        # define the predicted state sequence     
-        x_pred = self.A_aug @ self.x0 + self.B_aug @ self.u_full + d_offset
+        # define s, which is the predicted state sequence over h
+        self.s = cp.Variable((self.nx * self.h, 1))
+        x_pred_expr = self.A_aug @ self.x0_param + self.B_aug @ self.u_full + d_offset
 
-        # define the cost function 
-        self.opt_cost = cp.quad_form(x_pred, self.Q_aug) + cp.quad_form(self.u_full, self.R_aug)
+        # define the cost function (quadratic over s)
+        self.opt_cost = cp.quad_form(self.s, self.Q_aug) + cp.quad_form(self.u_full, self.R_aug)
         
-        #define the constraints
-        self.opt_constraints = []
+        # constrain s to the dynamics (this connects s to the predicted state sequence)
+        self.opt_constraints = [self.s == x_pred_expr]
+
+        # other constraints 
         if self.constraints["type"] == "box":
-            self.opt_constraints += [self.x_min_aug <= x_pred]
-            self.opt_constraints += [x_pred <= self.x_max_aug]
+            self.opt_constraints += [self.x_min_aug <= self.s]
+            self.opt_constraints += [self.s <= self.x_max_aug]
             self.opt_constraints += [self.u_min_aug <= self.u_full]
             self.opt_constraints += [self.u_full <= self.u_max_aug]
         elif self.constraints["type"] == "lmi":
-            self.opt_constraints += [self.Mx_aug @ x_pred <= self.bx_aug]
+            self.opt_constraints += [self.Mx_aug @ self.s <= self.bx_aug]
             self.opt_constraints += [self.Mu_aug @ self.u_full <= self.bu_aug]
         else:
             raise ValueError(f"Unknown constraint type: {self.constraints['type']}")
@@ -377,16 +468,24 @@ class MPC():
 
     def solve(self, x0, u0):
 
+        if self.new_model_parameters:
+            self.update_internal_parameters()
+            self.new_model_parameters = False  
+
         self.x0 = np.array(x0).reshape(-1, 1)
         self.u0 = np.array(u0).reshape(-1, 1)
 
-        # update disturbance estimate from one-step prediction error
+        # update disturbance estimate from prediction error
         if self.disturbance and self.x_prev is not None:
             prediction_error = self.x0 - self.A @ self.x_prev - self.B @ self.u_prev
             self.d_hat, _, _, _ = np.linalg.lstsq(self.B, prediction_error, rcond=None)
 
-        # (re)build the problem with current x0, u0, d_hat
-        self._construct_optimization_problem()
+        # update initial state 
+        self.x0_param.value = self.x0
+
+        # update disturbance estimate
+        if self.disturbance:
+            self.d_hat_param.value = self.d_hat
 
         # solve the optimization problem
         self.prob.solve()
@@ -397,11 +496,7 @@ class MPC():
         # results
         self.result_control_next        = self.u_full.value[:self.nu]
         self.result_control_sequence    = self.u_full.value
-        if self.disturbance:
-            d_offset                    = self.D_aug @ self.d_hat
-        else:
-            d_offset                    = np.zeros((self.nx * self.h, 1))
-        self.result_state_sequence      = self.A_aug @ self.x0 + self.B_aug @ self.u_full.value + d_offset
+        self.result_state_sequence      = self.s.value
 
         # store state and commanded input for next disturbance update
         if self.disturbance:
