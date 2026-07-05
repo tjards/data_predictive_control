@@ -1,11 +1,11 @@
 
-# Convex Data-driven Predictive Control (DPC) 
+# Convex Data Predictive Control (DPC)
 
-A convex data-driven predictive control (DPC) framework for systems operating in biased conditions such as wind. System matrices are identified online from input-output data, disturbances are estimated from prediction residuals, and [cvxpy](https://www.cvxpy.org/) solves the resulting convex optimization at each step.
+A convex data-driven predictive control (DPC) framework for systems with unknown dynamics operating in biased conditions (e.g., wind). System dynamics are modelled online from data; bias is treated as a disturbance, estimated from prediction residuals; and [cvxpy](https://www.cvxpy.org/) solves the resulting convex optimization at each step.
 
 ## Formulation
 
-At each time step $k$, the following problem is solved over prediction horizon $h$:
+At each time step $k$, the following convex problem is solved over prediction horizon $h$:
 
 $$\min_{U} \; J = \sum_{i=0}^{h-1} \Bigl[ x(k{+}i)^\top Q\, x(k{+}i) + u(k{+}i)^\top R\, u(k{+}i) \Bigr] + x(k{+}h)^\top P\, x(k{+}h)$$
 
@@ -17,65 +17,77 @@ $$x_{\min} \leq x(k{+}i) \leq x_{\max}, \quad i = 1,\ldots,h$$
 
 $$u_{\min} \leq u(k{+}i) \leq u_{\max}, \quad i = 0,\ldots,h{-}1$$
 
-where $Q \succeq 0$, $R \succ 0$, and $P \succeq 0$ are state, input, and terminal cost weights ($P$ is the solution to the [Discrete Algebraic Riccati Equation](https://docs.scipy.org/doc/scipy/reference/generated/scipy.linalg.solve_discrete_are.html)). The three data-driven quantities are updated online at every step:
+where $Q \succeq 0$, $R \succ 0$, and $P \succeq 0$ are state, input, and terminal cost weights; $\hat{A}$ and $\hat{B}$ are linear time-invariant state transition and input matrix estimates of the plant dynamics; $x$ are states; $u$ are inputs; and $\hat{d}$ is disturbance estimate. Given $\hat{A}$, $\hat{B}$, $Q$, and $R$, the elements of $P$ are automatically derived as the solution to the [Discrete Algebraic Riccati Equation](https://docs.scipy.org/doc/scipy/reference/generated/scipy.linalg.solve_discrete_are.html). 
 
-**Model** — $\hat{A},\hat{B}$ are identified from a sliding window of $N$ input-output pairs via least-squares (see [Data-driven Modelling](#data-driven-modelling)):
+### Data-driven terms 
 
-$$[\hat{A},\,\hat{B},\,\hat{c}] = \arg\min \sum_{j=1}^{N} \bigl\| x(j{+}1) - \hat{A}\,x(j) - \hat{B}\,u(j) - \hat{c} \bigr\|^2$$
+The following terms are updated online at every step:
 
-**Disturbance** — $\hat{d}$ is inferred from the one-step prediction residual via the Moore-Penrose pseudoinverse $\hat{B}^\dagger$ (see [Bias Rejection](#bias-rejection)):
+- **Dynamics** — $\hat{A}$, $\hat{B}$, and offset $\hat{c}$ are identified from a sliding window of $n$ input-output samples to minimize the following (see [Data-driven Modelling](#data-driven-modelling)):
+
+$$[\hat{A},\,\hat{B},\,\hat{c}] = \arg\min \sum_{j=1}^{n} \bigl\| x(j{+}1) - \hat{A}\,x(j) - \hat{B}\,u(j) - \hat{c} \bigr\|^2$$
+
+- **Disturbance** — $\hat{d}$ is inferred from the prediction residual via the Moore-Penrose pseudoinverse $\hat{B}^\dagger$ (see [Bias Rejection](#bias-rejection)):
 
 $$\hat{d}(k) = \hat{B}^{\dagger} \Bigl[ x(k) - \hat{A}\,x(k{-}1) - \hat{B}\,u(k{-}1) \Bigr]$$
 
-**Stacked prediction** — the dynamics are lifted over the full horizon for the optimizer:
+### Stacked predictions
+
+Within the optimization, dynamics are lifted over the full horizon by generating stacked state and input vectors and *augmented* state-space matrices as follows:
 
 $$X_{\text{pred}} = \hat{\mathcal{A}}\,x(k) + \hat{\mathcal{B}}\,U + \hat{\mathcal{D}}\,\hat{d}$$
 
 where $\hat{\mathcal{A}} \in \mathbb{R}^{h n_x \times n_x}$, $\hat{\mathcal{B}} \in \mathbb{R}^{h n_x \times h n_u}$, $\hat{\mathcal{D}} \in \mathbb{R}^{h n_x \times n_u}$, and $U = [u(k)^\top, \ldots, u(k{+}h{-}1)^\top]^\top$.
 
-The MPC engages only once $(\hat{A},\hat{B})$ satisfies stability (spectral radius $< 1.1$) and full controllability ($\text{rank}[\hat{B},\,\hat{A}\hat{B},\,\ldots,\,\hat{A}^{n_x-1}\hat{B}] = n_x$).
+### Enforced viability 
+
+A data-driven model is considered viable when the following conditions are satisfied:
+
+- The eigenvalues of the state-transition matrix estimate are stabilizing, such that $\max_i |\lambda_i(\hat A)| \leq 1$
+
+- The combination of $\hat{A}$ and $\hat{B}$ is controllable such that $\text{rank}[\hat{B},\,\hat{A}\hat{B},\,\ldots,\,\hat{A}^{n_x-1}\hat{B}] = n_x$.
 
 ## Data-driven Modelling
 
-The plant is modelled as $x(k{+}1) = \hat{A}\,x(k) + \hat{B}\,u(k) + \hat{c}$, with $\hat{A}$ and $\hat{B}$ estimated online.
+The plant is modelled as $x(k{+}1) = \hat{A}\,x(k) + \hat{B}\,u(k) + \hat{c}$, with $\hat{A}$ and $\hat{B}$ estimated online using the methodology described below. 
 
 ### Excitation
 
-The plant is first excited with zero-mean random bounded inputs: each input drawn uniformly from $[u_{\min}, u_{\max}]$ is immediately followed by its negation (a *rockback* step). Trajectories are stored in a sliding window of length $N$.
+The modes of the plant are excited with random, bounded inputs drawn uniformly from $[u_{\min}, u_{\max}]$. Trajectories are stored in a sliding window of length $n$.
 
-### Residual (delta-x) Formulation
+### Incrementation
 
 Only the *state increment* is regressed, rather than the full next state:
 
 $$\Delta x(k) = x(k{+}1) - x(k) = \tilde{A}\,x(k) + \hat{B}\,u(k)$$
 
-This improves conditioning since $\Delta x$ is typically small relative to $x$. The full matrix is recovered as $\hat{A} = I + \tilde{A}$.
+This improves numeric conditioning, since $\Delta x$ is typically small relative to $x$. The state transition matrix is recovered as $\hat{A} = I + \tilde{A}$.
 
-### Internal Batch Normalization
+### Normalization
 
-Each batch is normalized by per-feature standard deviations from the current window before fitting:
+Each batch is normalized by the per-feature standard deviation before fitting:
 
 $$x_n = \frac{x}{\sigma_x}, \quad u_n = \frac{u}{\sigma_u}, \quad \Delta x_n = \frac{\Delta x}{\sigma_{\Delta x}}$$
 
-### Least Squares Fit
+### Regression
 
-A stacked regressor with a bias column is formed:
+A stacked regressor is constructed from the normalized data:
 
 $$Z_n = \begin{bmatrix} X_n \\ U_n \\ \mathbf{1}^\top \end{bmatrix} \in \mathbb{R}^{(n_x + n_u + 1) \times N}$$
 
-$\Phi_n$ is found by solving $\Delta X_n \approx \Phi_n Z_n$ via [numpy least squares](https://numpy.org/doc/stable/reference/generated/numpy.linalg.lstsq.html), then un-normalized:
+Parameter matrix $\Phi_n$ is found by solving $\Delta X_n \approx \Phi_n Z_n$ via [least squares](https://numpy.org/doc/stable/reference/generated/numpy.linalg.lstsq.html), then un-normalized:
 
 $$\tilde{A} = \text{diag}(\sigma_{\Delta x})\;\Phi_n^{(x)}\;\text{diag}(\sigma_x^{-1}), \qquad \hat{B}_{\text{new}} = \text{diag}(\sigma_{\Delta x})\;\Phi_n^{(u)}\;\text{diag}(\sigma_u^{-1})$$
 
-### Exponential Smoothing Update
+### Learning rate
 
-New estimates are blended into the running model with learning rate $\alpha \in (0,1]$:
+Parameters from each batch are blended into a running model with learning rate $\alpha \in (0,1]$:
 
 $$\hat{A} \leftarrow (1-\alpha)\,\hat{A} + \alpha\,(I + \tilde{A}), \qquad \hat{B} \leftarrow (1-\alpha)\,\hat{B} + \alpha\,\hat{B}_{\text{new}}$$
 
 ### Results
 
-The animation shows the excitation phase followed by the controlled trajectory once the model passes the viability checks stated in [Formulation](#formulation).
+The animation shows a brief excitation phase followed by the controlled trajectory. The control trajectory is produced only after the model passes the viability checks described above [Formulation](#formulation) (i.e., stable and controllable).
 
 ![Modeller excitation and convergence](docs/modeller/trajectory.gif)
 
@@ -86,11 +98,11 @@ The animation shows the excitation phase followed by the controlled trajectory o
 
 ## Bias Rejection
 
-Wind is treated as an unknown slowly-varying disturbance $d$ entering through the input channel:
+Bias (e.g., wind) is treated as an unknown slowly-varying disturbance $d$ entering through the input channel:
 
-$$x(k+1) = \hat{A}\,x(k) + \hat{B}\bigl(u(k) + d\bigr)$$
+$$x(k+1) = \hat{A}\,x(k) + \hat{B}\bigl(u(k) + \hat{d}\bigr)$$
 
-At each step, $\hat{d}$ is estimated from the one-step prediction residual via $\hat{B}^\dagger$ (as shown in [Formulation](#formulation)) and fed forward into the stacked prediction used by the optimizer.
+At each step, $\hat{d}$ is estimated from the prediction residual via $\hat{B}^\dagger$ (described in [Formulation](#formulation)) and fed forward into the stacked prediction used by the optimizer.
 
 ### Results
 
@@ -104,7 +116,11 @@ Without rejection the trajectory drifts from the origin; with rejection the esti
 |:---:|:---:|
 | ![Control inputs within bounds](docs/windy/inputs_withoutdist.png) | ![Velocity states within bounds](docs/windy/velocities_withoutdist.png) |
 
+## Discussion
 
+The formulation and results above demonstrate that a convex data-driven predictive control framework can be implemented without requiring a priori knowledge of the plant model. Moreover, the framework is robust to biased conditions (e.g., wind) by estimating and rejecting disturbances online. 
+
+The use of convex optimization ensures the control problem remains tractable and can be solved efficiently at each time step. This approach is applicable to a wide range of systems, provided their dynamics can be approximated as linear and the disturbances are slowly varying.
 
 ## Use
 
@@ -119,6 +135,7 @@ Parameters are configured in `configs/`.
 
 ## References
 
+- P. T. Jardine, S. N. Givigi, S. Yousefi and M. J. Korenberg, ["Adaptive MPC Using a Dual Fast Orthogonal Kalman Filter: Application to Quadcopter Altitude Control,"](https://ieeexplore.ieee.org/abstract/document/8207418) in IEEE Systems Journal, vol. 13, no. 1, pp. 973-981, March 2019
 - Parts of this project were developed with the assistance of Claude Sonnet 4.6
 - Solving the optimization: [cvxpy](https://www.cvxpy.org/)
 - Terminal cost via Discrete Algebraic Riccati Equation: [scipy.linalg.solve_discrete_are](https://docs.scipy.org/doc/scipy/reference/generated/scipy.linalg.solve_discrete_are.html)
