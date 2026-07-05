@@ -7,7 +7,11 @@ from scipy.linalg import solve_discrete_are
 import plant as le_plant 
 import mpc 
 import visualization.plot as plot
+from data_manager import Dataset
   
+# initial dataset
+data = Dataset()
+
 # ------------------------------------------------------------------
 # Model dynamics by exciting plant modes
 # ------------------------------------------------------------------
@@ -20,7 +24,20 @@ x = plant.x0.copy()
 modeller = mpc.Modeller()
 
 print(f"Exciting the plant modes for modelling...")
-x, excite_state_history, excite_input_history = modeller.excite(plant, x, [], [])
+
+x, excite_state_history, excite_input_history, A_hat_history, B_hat_history, step_history = modeller.excite(plant, x)
+
+data.step = step_history
+data.A_hat = A_hat_history
+data.B_hat = B_hat_history
+data.d_hat = None
+data.d = None
+data.target = None
+data.state = excite_state_history
+data.input = excite_input_history
+
+data.store(flush_after=True)
+
 print(f"Modelling complete. Model viable: {modeller.viable}")
 
 # ------------------------------------------------------------------

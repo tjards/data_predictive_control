@@ -1,6 +1,7 @@
 data/*
 visualization/animations/*  
 visualization/plots/*
+logs/*
 
 
 # Python cache files

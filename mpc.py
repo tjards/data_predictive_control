@@ -47,6 +47,7 @@ class Modeller():
         optimizer       = cfg['optimizer']
         random_seed     = cfg['random_seed']
         update_parameters_rate = cfg['update_parameters_rate']
+        #logging         = cfg['logging']
 
         # assign 
         self.A_hat  = np.array(A, ndmin=2)
@@ -76,7 +77,9 @@ class Modeller():
         self.Ts = Ts
         self.u0 = u0
 
-    def excite(self, plant, x, state_history, input_history):
+        #self.logging = logging 
+
+    def excite(self, plant, x, state_history =[], input_history =[], A_hat_history =[], B_hat_history =[], step_history =[]):
 
         # bounds
         u_max          = np.array(self.constraints['u_max'])
@@ -96,39 +99,42 @@ class Modeller():
         k               = 0
 
         # initialize log
-        with open('logs/model_log.txt', 'w') as model_log:
-            model_log.write('step,A_hat,B_hat\n')
+        #with open('logs/model_log.txt', 'w') as model_log:
+        #    model_log.write('step,A_hat,B_hat\n')
 
-            # excite the modes of the plant for a while 
-            while k < excite_max_steps:
+        # excite the modes of the plant for a while 
+        while k < excite_max_steps:
 
-                # determine if rockback needed 
-                if excite_count >= excite_hold_steps and not rockback:
-                    excite_count = 0
-                    u_exc = rng.uniform(u_min, u_max)
-                    rockback = True
-                elif excite_count >= excite_hold_steps and rockback:
-                    excite_count = 0
-                    u_exc = -u_exc
-                    rockback = False
-                excite_count += 1
+            # determine if rockback needed 
+            if excite_count >= excite_hold_steps and not rockback:
+                excite_count = 0
+                u_exc = rng.uniform(u_min, u_max)
+                rockback = True
+            elif excite_count >= excite_hold_steps and rockback:
+                excite_count = 0
+                u_exc = -u_exc
+                rockback = False
+            excite_count += 1
 
-                # update the model
-                self.update(x, u_exc)
+            # update the model
+            self.update(x, u_exc)
 
-                # evolve the plant
-                x = plant.evolve(x, u_exc, disturb = False)
-                        
-                # store
-                state_history.append(x.copy())
-                input_history.append(u_exc.copy())
+            # evolve the plant
+            x = plant.evolve(x, u_exc, disturb = False)
+                    
+            # store
+            state_history.append(x.copy())
+            input_history.append(u_exc.copy())
+            A_hat_history.append(self.A_hat.tolist())
+            B_hat_history.append(self.B_hat.tolist())
+            step_history.append(k)
 
-                # log
-                model_log.write(f'exc_{k + 1},{self.A_hat.tolist()},{self.B_hat.tolist()}\n')
-                
-                k += 1
+            # log
+            #model_log.write(f'exc_{k + 1},{self.A_hat.tolist()},{self.B_hat.tolist()}\n')
+            
+            k += 1
         
-        return x, state_history, input_history
+        return x, state_history, input_history, A_hat_history, B_hat_history, step_history
 
     def update(self, x, u):
 
