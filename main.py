@@ -27,15 +27,8 @@ print(f"Exciting the plant modes for modelling...")
 
 x, excite_state_history, excite_input_history, A_hat_history, B_hat_history, step_history = modeller.excite(plant, x)
 
-data.step = step_history
-data.A_hat = A_hat_history
-data.B_hat = B_hat_history
-data.d_hat = None
-data.d = None
-data.target = None
-data.state = excite_state_history
-data.input = excite_input_history
-
+annotated_step_history = [f"excite_{s}" for s in step_history]
+data.load(step = annotated_step_history, A_hat = A_hat_history, B_hat = B_hat_history, state = excite_state_history, input = excite_input_history)
 data.store(flush_after=True)
 
 print(f"Modelling complete. Model viable: {modeller.viable}")
@@ -82,9 +75,19 @@ for k in range(int(controller.Tf / controller.Ts)):
     # store actual state
     state_history.append(x.copy())
 
+    data.load(step = k, A_hat = controller.A, B_hat = controller.B, d_hat = controller.d_hat, d = plant.d, target = None, state = x, input = u)
+
+    data.store(flush_after=True)
+
+
+
+
 print(f"Simulation complete: {len(state_history) - 1} steps")
 print(f"Final state distance from goal: {np.linalg.norm(x):.4f}")
 
+log = data.load_dataset_log("data/dataset.txt")
+print(log.keys())
+print(log['A_hat'][67])
 
 # ------------------------------------------------------------------
 # Visualizations
