@@ -24,9 +24,9 @@ class Plant:
     def evolve(self, x, u, disturb = True):
         
         if not disturb:
-            x_next = self.A @ x + self.B @ (u)
+            x_next = self.A @ x.flatten() + self.B @ (u.flatten())
         else:
-            x_next = self.A @ x + self.B @ (u + self.d)
+            x_next = self.A @ x.flatten() + self.B @ (u.flatten() + self.d.flatten())
             
         # soften the constraint
         #softener = 1
