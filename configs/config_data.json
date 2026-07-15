@@ -1,3 +1,5 @@
 {
-    "collect": true
+    "collect": true,
+    "filepath": "data/dataset.h5",
+    "overwrite": true
 }

@@ -272,6 +272,8 @@ class MPC():
             self.d_hat = np.zeros((self.nu, 1))  # estimated input disturbance
             self.x_prev = None                   # previous measured state
             self.u_prev = None                   # previous commanded input
+        else:
+            self.d_hat = None
         
         self.update_internal_parameters()  
         self.new_model_parameters = False

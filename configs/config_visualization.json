@@ -1,5 +1,6 @@
 {
     "animate_path": "visualization/animations/trajectory.gif",
     "plot_inputs_path": "visualization/plots/inputs.png",
-    "plot_velocities_path": "visualization/plots/velocities.png"
+    "plot_velocities_path": "visualization/plots/velocities.png",
+    "keep_modelling_history": true
 }
