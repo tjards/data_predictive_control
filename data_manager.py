@@ -8,6 +8,7 @@ class Dataset:
 
     def __init__(self, filepath="data/dataset.h5", overwrite = True):
         
+        # note: file can have multiple 'groups'
         self.filepath = filepath
         
         # removes existing file at initialization, if flagged
@@ -26,6 +27,8 @@ class Dataset:
             "input",
             "plan",
         ]
+        
+        # pipeline phase (becomes group name in h5 file)
         self.phase = "untitled"
 
         # initialize attributes
@@ -35,6 +38,7 @@ class Dataset:
     # we can add one sample or batch(es) before storing 
     def stage(self, phase="untitled", step=None, A_hat=None, B_hat=None, d_hat=None, d=None, target=None, state=None, input=None, plan=None):
 
+        # can rename group on the fly
         self.phase = phase
 
         values = {
@@ -54,8 +58,10 @@ class Dataset:
             if value is not None:
                 getattr(self, key).append(value)
 
+    # stores and clears
     def store(self, flush_after=True):
 
+        # make dir if needed
         if os.path.dirname(self.filepath):
             os.makedirs(os.path.dirname(self.filepath), exist_ok=True)
 
@@ -104,21 +110,28 @@ class Dataset:
             for col in self.columns:
                 setattr(self, col, [])
 
+    # can read whole phase, or phase + specific key
+    def read(self, phase, key=None):
 
-    def read(self, phase, key):
-        with h5py.File(self.filepath, "r") as f:
-            return f[phase][key][:]
-
-    def load_phase(self, phase):
+        # initialize dictionary
         data = {}
 
         with h5py.File(self.filepath, "r") as f:
+            
+            # pull out the group 
             group = f[phase]
 
-            for key in group.keys():
+            # if no key specified, return all 
+            if key is None:
+                for name in group.keys():
+                    data[name] = group[name][:]
+            # else, just the specified key
+            else:
                 data[key] = group[key][:]
 
-        return data
+        return data 
+
+
 
     def _make_batch(self, staged):
 

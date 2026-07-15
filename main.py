@@ -32,7 +32,7 @@ data.stage(phase = 'modelling', step = step_history, A_hat = A_hat_history, B_ha
 data.store()
 
 
-annotated_step_history = [f"excite_{s}" for s in step_history]
+#annotated_step_history = [f"excite_{s}" for s in step_history]
 
 print(f"Modelling complete. Model viable: {modeller.viable}")
 
@@ -54,9 +54,9 @@ controller.new_model_parameters = True
 controller.confirm_feasibility(x, controller.u0)
 
 # initialize storage 
-state_history = [x.copy()]
-input_history = []
-predicted_sequences = []
+#state_history = [x.copy()]
+#input_history = []
+#predicted_sequences = []
 
 # initialize the control input
 u = controller.u0
@@ -68,23 +68,23 @@ for k in range(int(controller.Tf / controller.Ts)):
 
     # store predicted sequence 
     current_plan = controller.result_state_sequence.reshape(controller.h,controller.nx,).copy()
-    predicted_sequences.append(current_plan)
+    #predicted_sequences.append(current_plan)
 
     # apply first control input and advance state
     u = controller.result_control_next.flatten()
-    input_history.append(u.copy())
+    #input_history.append(u.copy())
 
     x = plant.evolve(x, u)
 
     # store actual state
-    state_history.append(x.copy())
+    #state_history.append(x.copy())
 
     data.stage(phase = 'controller', step = k, A_hat = controller.A, B_hat = controller.B, d_hat = controller.d_hat, d = plant.d, target = None, state = x, input = u, plan = current_plan)
     data.store(flush_after=True)
 
 
 
-print(f"Simulation complete: {len(state_history) - 1} steps")
+print(f"Simulation complete: {k - 1} steps")
 print(f"Final state distance from goal: {np.linalg.norm(x):.4f}")
 
 
@@ -100,6 +100,16 @@ with open('configs/config_visualization.json') as f:
 animate_path            = cfg['animate_path']
 plot_inputs_path        = cfg['plot_inputs_path']
 plot_velocities_path    = cfg['plot_velocities_path']
+
+# pull out from data 
+modelling_data = data.read('modelling')
+controller_data = data.read('controller')
+excite_state_history = list(modelling_data["state"])
+excite_input_history = list(modelling_data["input"])
+state_history = list(controller_data["state"])
+input_history = list(controller_data["input"])
+predicted_sequences = list(controller_data["plan"])
+
 
 # ---
 keep_excitation_history = True
