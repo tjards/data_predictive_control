@@ -1,0 +1,728 @@
+# Link Between the Nonlinear Disturbance Equations and Code
+
+The `MultiVortexField` class defines the true nonlinear disturbance acting on the plant. The disturbance enters through the input channel:
+
+```math
+x_{k+1} = A x_k + B\left(u_k + d(p_k,t_k)\right)
+```
+
+where:
+
+```math
+p_k =
+\begin{bmatrix}
+p_x \\
+p_y
+\end{bmatrix}
+```
+
+is the robot position, and:
+
+```math
+d(p,t) =
+\begin{bmatrix}
+d_x(p,t) \\
+d_y(p,t)
+\end{bmatrix}
+```
+
+is the nonlinear disturbance field.
+
+The plant does not see the commanded control input `u` alone. Instead, it sees the combined input:
+
+```math
+u_{\text{effective}} = u + d(p,t)
+```
+
+The purpose of CALA is to learn a compensating residual input:
+
+```math
+u_{\text{CALA}}(p,t) \approx -d(p,t)
+```
+
+so that the effective input becomes closer to the intended nominal input.
+
+---
+
+## Full Disturbance Equation
+
+The disturbance field is composed of two parts:
+
+1. A slowly rotating background wind.
+2. A sum of nonlinear vortex-like spatial disturbances.
+
+The full equation implemented by `MultiVortexField` is:
+
+```math
+d(p,t)
+=
+A_b
+\begin{bmatrix}
+\cos(\omega t) \\
+\sin(\omega t)
+\end{bmatrix}
++
+\sum_{i=1}^{N_v}
+a_i
+g_i(t)
+\begin{bmatrix}
+-(p_y-c_{i,y}(t)) \\
+p_x-c_{i,x}(t)
+\end{bmatrix}
+\exp\left(
+-\frac{\|p-c_i(t)\|^2}{\sigma_i^2}
+\right)
+```
+
+where:
+
+```math
+g_i(t)
+=
+1
++
+0.30\sin\left(
+0.5\omega t + \|c_i(t)\|
+\right)
+```
+
+The terms are:
+
+| Symbol                           | Meaning                              | Code variable                  |
+| -------------------------------- | ------------------------------------ | ------------------------------ |
+| (d(p,t))                         | Total nonlinear disturbance          | `total`                        |
+| (A_b)                            | Background wind amplitude            | `self.cfg.background_amp`      |
+| (\omega)                         | Background wind angular rate         | `self.cfg.omega`               |
+| (N_v)                            | Number of vortices                   | `len(self.cfg.vortex_centers)` |
+| (a_i)                            | Vortex amplitude                     | `amp`                          |
+| (\sigma_i)                       | Vortex spatial width                 | `sigma`                        |
+| (c_i(t))                         | Centre of vortex (i)                 | `c`                            |
+| (g_i(t))                         | Time-varying vortex gain             | `time_gain`                    |
+| (p-c_i(t))                       | Relative position from vortex centre | `rel`                          |
+| (\exp(-|p-c_i(t)|^2/\sigma_i^2)) | RBF envelope                         | `rbf`                          |
+
+---
+
+## Background Wind Term
+
+The background wind is implemented as:
+
+```python
+b = self.cfg.background_amp * np.array(
+    [
+        np.cos(self.cfg.omega * t),
+        np.sin(self.cfg.omega * t),
+    ],
+    dtype=float,
+)
+```
+
+This corresponds to:
+
+```math
+b(t)
+=
+A_b
+\begin{bmatrix}
+\cos(\omega t) \\
+\sin(\omega t)
+\end{bmatrix}
+```
+
+This is a spatially uniform wind field. It has the same value everywhere in the workspace, but its direction rotates slowly over time.
+
+---
+
+## Vortex Centres
+
+The physical vortex centres are initialized from the configuration:
+
+```python
+centres = np.asarray(self.cfg.vortex_centers, dtype=float).copy()
+```
+
+Each vortex centre is:
+
+```math
+c_i =
+\begin{bmatrix}
+c_{i,x} \\
+c_{i,y}
+\end{bmatrix}
+```
+
+If moving centres are disabled, the centres are fixed:
+
+```python
+if not self.cfg.moving_centres:
+    return centres
+```
+
+This corresponds to:
+
+```math
+c_i(t)=c_i
+```
+
+If moving centres are enabled, each centre moves slightly over time:
+
+```python
+centres[i, 0] += self.cfg.centre_motion_amp * np.sin(
+    self.cfg.centre_motion_rate * t + phase
+)
+
+centres[i, 1] += self.cfg.centre_motion_amp * np.cos(
+    self.cfg.centre_motion_rate * t + phase
+)
+```
+
+This corresponds to:
+
+```math
+c_{i,x}(t)
+=
+c_{i,x}
++
+A_c\sin(\omega_c t+\varphi_i)
+```
+
+```math
+c_{i,y}(t)
+=
+c_{i,y}
++
+A_c\cos(\omega_c t+\varphi_i)
+```
+
+where:
+
+```math
+\varphi_i = i\frac{\pi}{2}
+```
+
+In code:
+
+```python
+phase = i * np.pi / 2.0
+```
+
+The centre motion makes the disturbance field change over time while preserving the same general nonlinear structure.
+
+---
+
+## Relative Position
+
+For each vortex, the code computes the robot’s position relative to the vortex centre:
+
+```python
+rel = p - c
+```
+
+This corresponds to:
+
+```math
+r_i(p,t)
+=
+p-c_i(t)
+```
+
+or explicitly:
+
+```math
+r_i(p,t)
+=
+\begin{bmatrix}
+p_x-c_{i,x}(t) \\
+p_y-c_{i,y}(t)
+\end{bmatrix}
+```
+
+This relative vector is used to determine both the strength and the direction of the vortex disturbance at the current position.
+
+---
+
+## RBF Spatial Envelope
+
+The local spatial influence of each vortex is computed as:
+
+```python
+rbf = np.exp(-np.dot(rel, rel) / (sigma**2))
+```
+
+This corresponds to:
+
+```math
+\psi_i(p,t)
+=
+\exp\left(
+-\frac{\|p-c_i(t)\|^2}{\sigma_i^2}
+\right)
+```
+
+This term makes the vortex local.
+
+Near the centre:
+
+```math
+\|p-c_i(t)\| \approx 0
+```
+
+so:
+
+```math
+\psi_i(p,t) \approx 1
+```
+
+Far from the centre:
+
+```math
+\|p-c_i(t)\| \gg \sigma_i
+```
+
+so:
+
+```math
+\psi_i(p,t) \approx 0
+```
+
+Thus, each vortex has a strong effect near its centre and a weak effect far away.
+
+---
+
+## Vortex Direction
+
+The vortex direction is computed as:
+
+```python
+vortex_direction = np.array([-rel[1], rel[0]], dtype=float)
+```
+
+Since:
+
+```math
+rel =
+\begin{bmatrix}
+p_x-c_{i,x}(t) \\
+p_y-c_{i,y}(t)
+\end{bmatrix}
+```
+
+this becomes:
+
+```math
+\text{vortex\_direction}
+=
+\begin{bmatrix}
+-(p_y-c_{i,y}(t)) \\
+p_x-c_{i,x}(t)
+\end{bmatrix}
+```
+
+This is a 90-degree rotation of the radial vector:
+
+```math
+\begin{bmatrix}
+0 & -1 \\
+1 & 0
+\end{bmatrix}
+\begin{bmatrix}
+p_x-c_{i,x}(t) \\
+p_y-c_{i,y}(t)
+\end{bmatrix}
+=
+\begin{bmatrix}
+-(p_y-c_{i,y}(t)) \\
+p_x-c_{i,x}(t)
+\end{bmatrix}
+```
+
+This rotated vector creates circular or vortex-like flow around the centre.
+
+The sign of the vortex amplitude controls the direction of rotation:
+
+```python
+# Amp sign controls clockwise/counter-clockwise rotation.
+```
+
+If:
+
+```math
+a_i > 0
+```
+
+the vortex rotates in one direction.
+
+If:
+
+```math
+a_i < 0
+```
+
+the vortex rotates in the opposite direction.
+
+---
+
+## Time-Varying Vortex Strength
+
+The time-varying gain is computed as:
+
+```python
+time_gain = 1.0 + 0.30 * np.sin(
+    0.5 * self.cfg.omega * t + np.linalg.norm(c)
+)
+```
+
+This corresponds to:
+
+```math
+g_i(t)
+=
+1
++
+0.30\sin\left(
+0.5\omega t + \|c_i(t)\|
+\right)
+```
+
+This makes each vortex grow and shrink over time.
+
+The phase shift:
+
+```python
+np.linalg.norm(c)
+```
+
+means different vortices can vary out of phase depending on their locations.
+
+---
+
+## Individual Vortex Contribution
+
+Each vortex contributes:
+
+```python
+total += amp * time_gain * vortex_direction * rbf
+```
+
+This corresponds to:
+
+```math
+d_i(p,t)
+=
+a_i
+g_i(t)
+\begin{bmatrix}
+-(p_y-c_{i,y}(t)) \\
+p_x-c_{i,x}(t)
+\end{bmatrix}
+\exp\left(
+-\frac{\|p-c_i(t)\|^2}{\sigma_i^2}
+\right)
+```
+
+So each vortex contribution is made of:
+
+```text
+vortex contribution
+=
+amplitude
+× time-varying gain
+× circular direction
+× local RBF envelope
+```
+
+---
+
+## Total Disturbance
+
+The code begins with the background wind:
+
+```python
+total = b.copy()
+```
+
+Then adds each vortex contribution:
+
+```python
+for c, sigma, amp in zip(
+    centres,
+    self.cfg.vortex_sigmas,
+    self.cfg.vortex_amps,
+):
+    rel = p - c
+    rbf = np.exp(-np.dot(rel, rel) / (sigma**2))
+    vortex_direction = np.array([-rel[1], rel[0]], dtype=float)
+
+    time_gain = 1.0 + 0.30 * np.sin(
+        0.5 * self.cfg.omega * t + np.linalg.norm(c)
+    )
+
+    total += amp * time_gain * vortex_direction * rbf
+```
+
+This implements:
+
+```math
+d(p,t)
+=
+b(t)
++
+\sum_{i=1}^{N_v} d_i(p,t)
+```
+
+or:
+
+```math
+d(p,t)
+=
+A_b
+\begin{bmatrix}
+\cos(\omega t) \\
+\sin(\omega t)
+\end{bmatrix}
++
+\sum_{i=1}^{N_v}
+a_i
+g_i(t)
+\begin{bmatrix}
+-(p_y-c_{i,y}(t)) \\
+p_x-c_{i,x}(t)
+\end{bmatrix}
+\exp\left(
+-\frac{\|p-c_i(t)\|^2}{\sigma_i^2}
+\right)
+```
+
+The returned value:
+
+```python
+return total
+```
+
+is the total nonlinear disturbance vector:
+
+```math
+d(p,t)
+=
+\begin{bmatrix}
+d_x(p,t) \\
+d_y(p,t)
+\end{bmatrix}
+```
+
+---
+
+## Grid Evaluation for Plotting
+
+The `grid()` method evaluates the same disturbance equation over a rectangular mesh.
+
+The grid points are created with:
+
+```python
+xs = np.linspace(xlim[0], xlim[1], n)
+ys = np.linspace(ylim[0], ylim[1], n)
+X, Y = np.meshgrid(xs, ys)
+```
+
+Each grid point is a position:
+
+```math
+p =
+\begin{bmatrix}
+X_{r,c} \\
+Y_{r,c}
+\end{bmatrix}
+```
+
+Then the code evaluates the disturbance at each point:
+
+```python
+d = self.disturbance(np.array([X[row, col], Y[row, col]]), t)
+U[row, col] = d[0]
+V[row, col] = d[1]
+```
+
+This means:
+
+```math
+U_{r,c} = d_x(p_{r,c},t)
+```
+
+```math
+V_{r,c} = d_y(p_{r,c},t)
+```
+
+The speed is computed as:
+
+```python
+speed = np.sqrt(U**2 + V**2)
+```
+
+This corresponds to:
+
+```math
+\|d(p,t)\|
+=
+\sqrt{
+d_x(p,t)^2
++
+d_y(p,t)^2
+}
+```
+
+In the plot:
+
+| Plot element                | Meaning                                                         |
+| --------------------------- | --------------------------------------------------------------- |
+| `U`, `V` arrows             | Direction and strength of (d(p,t))                              |
+| `speed` shading             | Magnitude (|d(p,t)|)                                            |
+| vortex centre markers       | True physical disturbance centres                               |
+| CALA feature centre markers | Locations of learner basis functions, not physical disturbances |
+
+---
+
+## Disturbance Centres vs CALA Feature Centres
+
+The physical vortex centres and the CALA feature centres are different objects.
+
+### Physical vortex centres
+
+These define the true nonlinear disturbance field:
+
+```python
+self.cfg.vortex_centers
+```
+
+They appear in the disturbance equation as:
+
+```math
+c_i(t)
+```
+
+They create the actual disturbance:
+
+```math
+d(p,t)
+```
+
+### CALA feature centres
+
+These define where the learner places local action distributions:
+
+```python
+feature_centers
+```
+
+They are used to compute feature activations such as:
+
+```math
+\phi_j(p)
+=
+\exp\left(
+-\frac{\|p-z_j\|^2}{\ell_j^2}
+\right)
+```
+
+where (z_j) is a CALA feature centre.
+
+These do not create the disturbance. They help CALA learn a compensation field:
+
+```math
+u_{\text{CALA}}(p,t)
+=
+\sum_j
+\phi_j(p,t)
+\Delta u_j
+```
+
+The goal is:
+
+```math
+u_{\text{CALA}}(p,t)
+\approx
+-d(p,t)
+```
+
+So:
+
+```text
+vortex centres = true causes of the disturbance
+
+CALA feature centres = places where the learner stores local compensation actions
+```
+
+---
+
+## Summary
+
+The `MultiVortexField` class implements a nonlinear, time-varying input-channel disturbance:
+
+```math
+x_{k+1}
+=
+A x_k
++
+B\left(
+u_k
++
+d(p_k,t_k)
+\right)
+```
+
+where:
+
+```math
+d(p,t)
+=
+\text{background wind}
++
+\text{sum of nonlinear vortex fields}
+```
+
+The disturbance is nonlinear because its value depends on the robot’s position through terms such as:
+
+```math
+p-c_i(t)
+```
+
+and:
+
+```math
+\exp\left(
+-\frac{\|p-c_i(t)\|^2}{\sigma_i^2}
+\right)
+```
+
+The disturbance is time-varying because of:
+
+```math
+\cos(\omega t), \quad \sin(\omega t)
+```
+
+and the vortex gain:
+
+```math
+g_i(t)
+=
+1
++
+0.30\sin\left(
+0.5\omega t + \|c_i(t)\|
+\right)
+```
+
+CALA does not generate this disturbance. CALA observes the effect of the disturbance and learns a residual compensation field:
+
+```math
+u_{\text{CALA}}(p,t)
+\approx
+-d(p,t)
+```
+
+This creates the intended architecture:
+
+```text
+Nominal controller handles the locally reliable dynamics.
+
+CALA learns nonlinear residual compensation across the state space.
+```
