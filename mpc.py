@@ -98,6 +98,8 @@ class Modeller():
         rockback        = False                   # set to False initially, avoids biasing the model in one direction
         k               = 0
 
+        self.excite_time = excite_time
+
         # initialize log
         #with open('logs/model_log.txt', 'w') as model_log:
         #    model_log.write('step,A_hat,B_hat\n')
