@@ -5,17 +5,32 @@ from scipy.linalg import solve_discrete_are
 
 # custom imports
 import plant as le_plant 
+import disturbance_generator 
 import mpc 
 import visualization.plot as plot
 from data_manager import Dataset
 
 # ------------------------------------------------------------------
+# Pipeline Setup
+# ------------------------------------------------------------------ 
+pipeline = {
+    'model':    False,
+    'control':  True
+}
+# ------------------------------------------------------------------
 # Initialize plant and data
 # ------------------------------------------------------------------
+
+# initialize the global timer
+t = 0.0
 
 # initialize plant
 plant = le_plant.Plant()
 x = plant.x0.copy()
+
+# initialize disturbances
+disturbor = disturbance_generator.Disturbance()
+d = disturbor.evolve(t)
 
 # initial dataset
 with open('configs/config_data.json') as f:
@@ -23,25 +38,46 @@ with open('configs/config_data.json') as f:
 data = Dataset(filepath=cfg_dat["filepath"], overwrite=cfg_dat["overwrite"])
 
 # ------------------------------------------------------------------
-# Model dynamics by exciting plant modes
+# Model dynamics by exciting plant modes (no disturbances)
 # ------------------------------------------------------------------
+if pipeline['model']:
 
-# initialize modeller 
-modeller = mpc.Modeller()
+    # initialize modeller 
+    modeller = mpc.Modeller()
 
-print(f"Exciting the plant modes for modelling...")
+    print(f'Modelling started at time: {round(t)} seconds')
+    print(f"Exciting the plant modes for modelling...")
 
-x, state_history, input_history, A_hat_history, B_hat_history, step_history = modeller.excite(plant, x)
+    x, t, state_history, input_history, A_hat_history, B_hat_history, step_history = modeller.excite(plant, disturbor, x, t)
 
-data.stage(phase = 'modelling', 
-           step = step_history, 
-           A_hat = A_hat_history, 
-           B_hat = B_hat_history, 
-           state = state_history, 
-           input = input_history,)
-data.store()
+    print(f'Modelling completed at time: {round(t)} seconds')
 
-print(f"Modelling complete. Model viable: {modeller.viable}")
+    data.stage(phase = 'modelling', 
+            step = step_history, 
+            A_hat = A_hat_history, 
+            B_hat = B_hat_history, 
+            state = state_history, 
+            input = input_history,)
+    data.store()
+
+    print(f"Modelling complete. Model viable: {modeller.viable}")
+
+    # pull new data
+    modelling_data          = data.read('modelling') 
+
+else:
+
+    # pull data from defaults
+    data_defaults = Dataset(filepath=cfg_dat["defaults"], overwrite=False)
+    modelling_data          = data_defaults.read('modelling')
+
+# extract what we need later 
+epsilon = 1e-5
+A_hat = modelling_data['A_hat'][-1]
+A_hat[A_hat < epsilon] = 0.0
+B_hat = modelling_data['B_hat'][-1]
+B_hat[B_hat < epsilon] = 0.0
+
 
 # ------------------------------------------------------------------
 # Run the Controller 
@@ -51,8 +87,8 @@ print(f"Modelling complete. Model viable: {modeller.viable}")
 
 # initialize the MPC controller and load params f
 controller = mpc.MPC(x)
-controller.A = modeller.A_hat
-controller.B = modeller.B_hat
+controller.A = A_hat    #modeller.A_hat
+controller.B = B_hat    #modeller.B_hat
 controller.new_model_parameters = True
 
 # check feasibility of the current state and input
@@ -60,6 +96,8 @@ controller.confirm_feasibility(x, controller.u0)
 
 # initialize the control input
 u = controller.u0
+
+print(f'Controller started at time: {round(t)} seconds')
 
 for k in range(int(controller.Tf / controller.Ts)):
 
@@ -69,9 +107,14 @@ for k in range(int(controller.Tf / controller.Ts)):
     # store predicted sequence 
     current_plan = controller.result_state_sequence.reshape(controller.h,controller.nx,).copy()
 
-    # apply first control input and advance state
+    # apply first control input 
     u = controller.result_control_next.flatten()
-    x = plant.evolve(x, u)
+
+    # evolve the disturbance
+    d = disturbor.evolve(k*controller.Ts)
+
+    # evolve the plant
+    x = plant.evolve(x, u, d, disturb=True)
 
     data.stage(phase = 'controller', 
                step = k, 
@@ -85,14 +128,12 @@ for k in range(int(controller.Tf / controller.Ts)):
                plan = current_plan)
     data.store(flush_after=True)
 
-print(f"Simulation complete: {int(controller.Tf / controller.Ts)} steps")
+    # increment the global timer
+    t += controller.Ts
+
+print(f'Controller completed at time: {round(t)} seconds')
 print(f"Final state distance from goal: {np.linalg.norm(x):.4f}")
 
-# ------------------------------------------------------------------
-# Extract data 
-# ------------------------------------------------------------------
-
-modelling_data          = data.read('modelling')
 controller_data         = data.read('controller')
 
 # ------------------------------------------------------------------

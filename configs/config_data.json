@@ -1,5 +1,6 @@
 {
     "collect": true,
     "filepath": "data/dataset.h5",
-    "overwrite": true
+    "overwrite": true,
+    "defaults": "data/dataset_defaults.h5"
 }

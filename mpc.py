@@ -79,7 +79,9 @@ class Modeller():
 
         #self.logging = logging 
 
-    def excite(self, plant, x, state_history =[], input_history =[], A_hat_history =[], B_hat_history =[], step_history =[]):
+    def excite(self, plant, disturbor, x, t, state_history =[], input_history =[], A_hat_history =[], B_hat_history =[], step_history =[]):
+
+        # t is initial time 
 
         # bounds
         u_max          = np.array(self.constraints['u_max'])
@@ -121,8 +123,11 @@ class Modeller():
             # update the model
             self.update(x, u_exc)
 
+            # evolve the disturbance
+            d = disturbor.evolve(k*self.Ts)
+
             # evolve the plant
-            x = plant.evolve(x, u_exc, disturb = False)
+            x = plant.evolve(x, u_exc, d, disturb = False)
                     
             # store
             state_history.append(x.copy())
@@ -135,8 +140,9 @@ class Modeller():
             #model_log.write(f'exc_{k + 1},{self.A_hat.tolist()},{self.B_hat.tolist()}\n')
             
             k += 1
+            t += self.Ts
         
-        return x, state_history, input_history, A_hat_history, B_hat_history, step_history
+        return x, t, state_history, input_history, A_hat_history, B_hat_history, step_history
 
     def update(self, x, u):
 

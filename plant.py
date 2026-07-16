@@ -12,17 +12,19 @@ class Plant:
         A   = np.array(cfg['A'])
         B   = np.array(cfg['B'])
         constraints = cfg['constraints']
-        d   = np.array(cfg['d'])
+        #d   = np.array(cfg['d'])
         x0  = np.array(cfg['x0'], dtype=float)
 
         self.A = A
         self.B = B
         self.constraints = constraints
-        self.d = d
+        self.d = None
         self.x0 = x0
 
-    def evolve(self, x, u, disturb = True):
+    def evolve(self, x, u, d, disturb = True):
         
+        self.d = d
+
         if not disturb:
             x_next = self.A @ x.flatten() + self.B @ (u.flatten())
         else:
