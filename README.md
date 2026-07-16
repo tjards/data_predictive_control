@@ -110,7 +110,7 @@ At each step, $\hat{d}$ is estimated from the prediction residual via $\hat{B}^\
 |:---:|:---:|
 | ![Trajectory without disturbance rejection](docs/windy/trajectory_withoutdist.gif) | ![Trajectory with disturbance rejection](docs/windy/trajectory_withdist.gif) |
 
-Without rejection the trajectory drifts from the origin; with rejection the estimated disturbance is cancelled in the predictions, restoring convergence.
+Without disturbance rejection the trajectory drifts from the origin; notice the agent also temporarily exceeds constraints. With rejection the estimated disturbance is cancelled in the predictions, restoring convergence.
 
 | Control Inputs | Velocity States |
 |:---:|:---:|
