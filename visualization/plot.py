@@ -14,18 +14,19 @@ import json
 
 
 # helper function for contour plotting
-def _cost_grid(X, Y, V):
-    pts = np.stack([X, Y], axis=-1)   
-    V2  = V[:2, :2]                   
-    return np.einsum('...i,ij,...j->...', pts, V2, pts)
+#def _cost_grid(X, Y, V):
+#    pts = np.stack([X, Y], axis=-1)   
+#    V2  = V[:2, :2]                   
+#    return np.einsum('...i,ij,...j->...', pts, V2, pts)
 
 
-def animate_trajectory(state_history, predicted_sequences, V,
+def animate_trajectory(state_history, predicted_sequences, V = None,
                        x_target=None, filename='trajectory.gif'):
     
     states = np.array(state_history)        
     T      = len(predicted_sequences)      
-    nx     = V.shape[0]
+    #nx     = V.shape[0]
+    nx = states.shape[0]
 
     if x_target is None:
         x_target = np.zeros(nx)
@@ -54,16 +55,16 @@ def animate_trajectory(state_history, predicted_sequences, V,
     # ------------------------------------------------------------------
     # Cost contour grid
     # ------------------------------------------------------------------
-    N_grid = 300
-    xx = np.linspace(x1_min, x1_max, N_grid)
-    yy = np.linspace(x2_min, x2_max, N_grid)
-    X, Y = np.meshgrid(xx, yy)
-    Z    = _cost_grid(X, Y, V)
+    # N_grid = 300
+    # xx = np.linspace(x1_min, x1_max, N_grid)
+    # yy = np.linspace(x2_min, x2_max, N_grid)
+    # X, Y = np.meshgrid(xx, yy)
+    # Z    = _cost_grid(X, Y, V)
 
-    # log levels give dark centre, light exterior
-    z_lo   = max(float(Z.min()), 1e-8)
-    z_hi   = float(Z.max())
-    levels = np.logspace(np.log10(z_lo), np.log10(z_hi), 30)
+    # # log levels give dark centre, light exterior
+    # z_lo   = max(float(Z.min()), 1e-8)
+    # z_hi   = float(Z.max())
+    # levels = np.logspace(np.log10(z_lo), np.log10(z_hi), 30)
 
     # ------------------------------------------------------------------
     # Figure elements
@@ -72,8 +73,8 @@ def animate_trajectory(state_history, predicted_sequences, V,
     fig, ax = plt.subplots(figsize=(7, 7))
 
     # contours
-    ax.contourf(X, Y, Z, levels=levels, cmap='gray_r')
-    ax.contour(X, Y, Z, levels=levels, colors='dimgray', linewidths=0.4, linestyles='--', alpha=0.5)
+    #ax.contourf(X, Y, Z, levels=levels, cmap='gray_r')
+    #ax.contour(X, Y, Z, levels=levels, colors='dimgray', linewidths=0.4, linestyles='--', alpha=0.5)
 
     # targets
     ax.plot(x_target[0], x_target[1], 'g+', markersize=14, markeredgewidth=2, label='target', zorder=6)

@@ -232,8 +232,8 @@ class MPC():
         # pull out stuff
         Ts  = cfg['Ts']  
         Tf  = cfg['Tf']
-        A   = 0*np.array(cfg['A'])
-        B   = 0*np.array(cfg['B'])
+        A   = np.array(cfg['A'])
+        B   = np.array(cfg['B'])
         Q   = np.diag(cfg['Q_diag'])
         R   = np.diag(cfg['R_diag'])
         P   = cfg['P_diag']  
@@ -242,6 +242,7 @@ class MPC():
         m   = cfg['m']
         constraints     = cfg['constraints']
         disturbance     = cfg['disturbance']
+        use_learned_model = cfg['use_learned_model']
 
         # assign
         self.A = np.array(A, ndmin=2)           # state matrix  
@@ -270,8 +271,11 @@ class MPC():
 
         # for feasibility checks
         self.h_max = 100
-        self.terminal_set_radius = 0.5
+        self.terminal_set_radius = 1
         self.h_min_feasible = None
+
+        # for learning
+        self.use_learned_model = use_learned_model
 
         # we can do disturbance rejection
         if self.disturbance:
@@ -284,7 +288,7 @@ class MPC():
         self.update_internal_parameters()  
         self.new_model_parameters = False
 
-    # confirm feasible in h, if not, suggest h 
+    # confirm feasible in h, if not, suggest h - note: there is an error here/ don't consider disturbances. 
     def confirm_feasibility(self, x0, u0):
 
         x0 = np.array(x0).reshape(-1, 1)
@@ -421,16 +425,22 @@ class MPC():
     def _build_augmented_constraints(self):
        
         if self.constraints["type"] == "box":
-            self.x_min_aug = np.tile(np.asarray(self.x_min).reshape(-1), self.h)
-            self.x_max_aug = np.tile(np.asarray(self.x_max).reshape(-1), self.h)
-            self.u_min_aug = np.tile(np.asarray(self.u_min).reshape(-1), self.h)
-            self.u_max_aug = np.tile(np.asarray(self.u_max).reshape(-1), self.h)
+            #self.x_min_aug = np.tile(np.asarray(self.x_min).reshape(-1), self.h)
+            #self.x_max_aug = np.tile(np.asarray(self.x_max).reshape(-1), self.h)
+            #self.u_min_aug = np.tile(np.asarray(self.u_min).reshape(-1), self.h)
+            #self.u_max_aug = np.tile(np.asarray(self.u_max).reshape(-1), self.h)
+            self.x_min_aug = np.tile(self.x_min, (self.h, 1))
+            self.x_max_aug = np.tile(self.x_max, (self.h, 1))
+            self.u_min_aug = np.tile(self.u_min, (self.h, 1))
+            self.u_max_aug = np.tile(self.u_max, (self.h, 1))
 
         elif self.constraints["type"] == "lmi":
             self.Mx_aug = np.kron(np.eye(self.h), self.Mx)
-            self.bx_aug = np.tile(np.asarray(self.bx).reshape(-1), self.h)
+            #self.bx_aug = np.tile(np.asarray(self.bx).reshape(-1), self.h)
+            self.bx_aug = np.tile(np.asarray(self.bx).reshape(-1, 1),(self.h, 1),)
             self.Mu_aug = np.kron(np.eye(self.h), self.Mu)
-            self.bu_aug = np.tile(np.asarray(self.bu).reshape(-1), self.h)
+            #self.bu_aug = np.tile(np.asarray(self.bu).reshape(-1), self.h)
+            self.bu_aug = np.tile(np.asarray(self.bu).reshape(-1, 1),(self.h, 1),)
 
         else:
             raise ValueError(f"Unknown constraint type: {self.constraints['type']}")
