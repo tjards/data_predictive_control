@@ -13,7 +13,6 @@ Generate a nonlinear input-channel disturbance field
 
         derivation in /docs/disturbance/nonlinear.md
 
-
 '''
 
 import numpy as np
@@ -21,6 +20,8 @@ import matplotlib.pyplot as plt
 from matplotlib.animation import FuncAnimation
 from matplotlib.lines import Line2D
 from matplotlib.patches import Patch
+from types import SimpleNamespace
+
 
 class VortexConfig():
 
@@ -41,10 +42,27 @@ class VortexConfig():
                                      1.00,
                                      -0.75])
         self.background_amp = 0.35
-        self.omega = 0.35
+        self.omega = 0.2 #0.35
         self.moving_centers = True
         self.center_motion_amp = 0.35
         self.center_motion_rate = 0.2
+
+        # centralized plotting parameter
+        self.pp = SimpleNamespace(
+            levels=30,
+            alpha=0.75,
+            density=1.2, 
+            linewidth=1.0, 
+            arrowsize=1.1, 
+            xlim=(-5.0, 5.0), 
+            ylim=(-5.0, 5.0), 
+            n=35,
+            dpi=180,
+            framealpha=0.9,
+            interval=50,
+            rate=0.15,
+            frames=90
+        )
 
 class VortexField:
 
@@ -108,18 +126,18 @@ class VortexField:
             d_actual += amp * gain * vortex_direction * spacial_influence
 
         return d_actual
-    
-    def grid_for_plots(self, xlim, ylim, n, t):
 
-        xs = np.linspace(xlim[0], xlim[1], n)
-        ys = np.linspace(ylim[0], ylim[1], n)
+    def grid_for_plots(self, t):
+
+        xs = np.linspace(self.config.pp.xlim[0], self.config.pp.xlim[1], self.config.pp.n)
+        ys = np.linspace(self.config.pp.ylim[0], self.config.pp.ylim[1], self.config.pp.n)
 
         X, Y = np.meshgrid(xs, ys)
         U = np.zeros_like(X)
         V = np.zeros_like(Y)
 
-        for row in range(n):
-            for col in range(n):
+        for row in range(self.config.pp.n):
+            for col in range(self.config.pp.n):
                 d = self.compute_disturbance(np.array([X[row, col], Y[row, col]]), t)
                 U[row, col] = d[0]
                 V[row, col] = d[1]
@@ -127,42 +145,72 @@ class VortexField:
         speed = np.sqrt(U**2 + V**2)
         return X, Y, U, V, speed        
 
+    def _draw_field(self, ax, t):
 
-    def plot_field_at_t(self, plot_field_path, xlim, ylim, n, t):
-
-        X, Y, U, V, speed = self. grid_for_plots(xlim=xlim, ylim=ylim, n=n, t=t)
-        centers = self.evolve_centers(t)
-
-        fig, ax = plt.subplots(figsize=(8,7))
-        contour = ax.contourf(X,Y, speed, levels = 30, alpha = 0.75)
-        fig.colorbar(contour, ax=ax, label = 'Disturbance Intensity')
-        ax.streamplot(X, Y, U, V, density = 1.2, linewidth = 1.0, arrowsize = 1.1)
-
-        # quiver may look nice later (optional)
-        #skip = 3
-        #ax.quiver(X[::skip, ::skip], Y[::skip, ::skip], U[::skip, ::skip], V[::skip, ::skip], angles="xy", scale_units="xy", scale=1.5, width=0.003)
-
-        #ax.scatter(centers[:, 0], centers[:, 1], marker="x", facecolors = 'red', s=90, label="Vortices Centers")
-        #ax.scatter(feature_map.centers[:, 0], feature_map.centers[:, 1], marker="o", s=45, facecolors="none", label="CALA will go here)
+        X, Y, U, V, speed = self.grid_for_plots(t=t)
+        contour = ax.contourf(X, Y, speed, levels=self.config.pp.levels, alpha=self.config.pp.alpha)
+        stream = ax.streamplot(X, Y, U, V, density=self.config.pp.density, linewidth=self.config.pp.linewidth, arrowsize=self.config.pp.arrowsize)
 
         ax.set_title(f"Disturbance field at t = {t:.2f}s")
         ax.set_xlabel("x")
         ax.set_ylabel("y")
-        ax.set_xlim(xlim)
-        ax.set_ylim(ylim)
+        ax.set_xlim(self.config.pp.xlim)
+        ax.set_ylim(self.config.pp.ylim)
         ax.set_aspect("equal", adjustable="box")
         ax.grid(True)
         #ax.legend(loc="upper right", framealpha=0.9)
         plt.tight_layout()
 
-        fig.savefig(plot_field_path, dpi=180)
+        return contour, stream
+
+
+    def plot_field_at_t(self, plot_field_path, t):
+
+        fig, ax = plt.subplots(figsize=(8,7))
+
+        contour, stream = self._draw_field(ax = ax, t = t)
+        
+        fig.colorbar(contour, ax=ax, label = 'Disturbance Intensity')
+        fig.savefig(plot_field_path, dpi=self.config.pp.dpi)
         plt.close(fig)
+
+    def animate_field(self, animate_field_path):
+
+        fig, ax = plt.subplots(figsize = (8, 7))
+        
+        # initial
+        initial_contour, stream = self._draw_field(ax = ax, t = 0.0)
+
+        fig.colorbar(initial_contour, ax=ax, label = 'Disturbance Intensity')
+
+        # legends 
+        legend_index= [
+            Patch(alpha=self.config.pp.alpha, label="Disturbance intensity"),
+            Line2D([0],[0], linewidth=self.config.pp.linewidth,label="Streamlines",),
+        ]
+
+        #ax.legend( handles=legend_index, loc="upper right", framealpha=self.config.pp.framealpha,)
+    
+        def update(frame):
+
+            t = frame*self.config.pp.rate
+            ax.clear()
+
+            contour, stream = self._draw_field(ax = ax, t = t)
+            #ax.legend(handles=legend_index, loc="upper right", framealpha=self.config.pp.framealpha,)
+
+        ani = FuncAnimation(fig, update, frames = self.config.pp.frames, interval = self.config.pp.interval, blit = False)
+        fig.tight_layout()
+        ani.save(animate_field_path, writer="pillow", fps=max(1, round(1000 / self.config.pp.interval)),)
+
+        plt.close(fig)
+
 
 
 # testing 
 field = VortexField()
-field.plot_field_at_t('visualization/plots/field.png', xlim=(-5.0, 5.0), ylim=(-5.0, 5.0), n = 35, t =0.0)
-
+field.plot_field_at_t(plot_field_path = 'visualization/plots/field.png', t =0.0)
+field.animate_field(animate_field_path="visualization/animations/field.gif")
 
 
 
