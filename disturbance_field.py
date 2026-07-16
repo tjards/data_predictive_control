@@ -34,7 +34,7 @@ class VortexConfig():
             [2.5, -2.0],
         ]) 
         
-        # corresponding size(s) and amplitudes(s)
+        # corresponding size(s), amplitudes(s), and rate(s)
         self.vortex_sigmas = np.array([1.5, 
                                        1.8, 
                                        1.4])
