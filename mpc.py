@@ -243,6 +243,8 @@ class MPC():
         constraints     = cfg['constraints']
         disturbance     = cfg['disturbance']
         use_learned_model = cfg['use_learned_model']
+        enforce_terminal = cfg['enforce_terminal']
+        horizon_feasibility_search = cfg['horizon_feasibility_search']
 
         # assign
         self.A = np.array(A, ndmin=2)           # state matrix  
@@ -271,11 +273,15 @@ class MPC():
 
         # for feasibility checks
         self.h_max = 100
-        self.terminal_set_radius = 1
+        self.terminal_set_radius = 2
         self.h_min_feasible = None
 
         # for learning
         self.use_learned_model = use_learned_model
+
+        # terminal constraints
+        self.enforce_terminal = enforce_terminal
+        self.horizon_feasibility_search = horizon_feasibility_search
 
         # we can do disturbance rejection
         if self.disturbance:
@@ -288,10 +294,14 @@ class MPC():
         self.update_internal_parameters()  
         self.new_model_parameters = False
 
-    # confirm feasible in h, if not, suggest h - note: there is an error here/ don't consider disturbances. 
+    # confirm feasible (expands h (but not m) until feasible): untested
     def confirm_feasibility(self, x0, u0):
 
+        if not self.horizon_feasibility_search:
+            return None
+
         x0 = np.array(x0).reshape(-1, 1)
+        u0 = np.array(u0).reshape(-1, 1)
 
         print(f"Checking feasibility of h={self.h}")
         print(f"Terminal region: {self.terminal_set_radius}")
@@ -314,7 +324,7 @@ class MPC():
 
                 # see if it solves
                 try:
-                    self.solve(x0, u0)
+                    self.solve(x0, u0, update_disturbance_estimate = False)
                 except RuntimeError:
                     print(f"Horizon h={h_trial}: failed to solve, increasing horizon...")
                     continue
@@ -489,10 +499,18 @@ class MPC():
         else:
             raise ValueError(f"Unknown constraint type: {self.constraints['type']}")
 
+        # enforce terminal constraint
+        if self.enforce_terminal:
+
+            x_terminal = self.s[-self.nx:, :]
+            #self.opt_constraints += [cp.norm(x_terminal, 2) <= self.terminal_set_radius]
+            position_terminal = x_terminal[:2, :]
+            self.opt_constraints += [cp.norm(position_terminal, 2) <= self.terminal_set_radius]
+
         # define the optimization problem
         self.prob = cp.Problem(cp.Minimize(self.opt_cost), self.opt_constraints)
 
-    def solve(self, x0, u0):
+    def solve(self, x0, u0, update_disturbance_estimate = True):
 
         if self.new_model_parameters:
             self.update_internal_parameters()
@@ -502,7 +520,7 @@ class MPC():
         self.u0 = np.array(u0).reshape(-1, 1)
 
         # update disturbance estimate from prediction error
-        if self.disturbance and self.x_prev is not None:
+        if self.disturbance and self.x_prev is not None and update_disturbance_estimate:
             prediction_error = self.x0 - self.A @ self.x_prev - self.B @ self.u_prev
             self.d_hat, _, _, _ = np.linalg.lstsq(self.B, prediction_error, rcond=None)
 
@@ -525,7 +543,7 @@ class MPC():
         self.result_state_sequence      = self.s.value
 
         # store state and commanded input for next disturbance update
-        if self.disturbance:
+        if self.disturbance and update_disturbance_estimate:
             self.x_prev = self.x0.copy()
             self.u_prev = self.result_control_next.copy()
 

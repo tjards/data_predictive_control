@@ -14,7 +14,7 @@ from data_manager import Dataset
 # Pipeline Setup
 # ------------------------------------------------------------------ 
 pipeline = {
-    'model':    False,
+    'model':    True,
     'control':  True,
     'visuals':  True
 }
@@ -95,7 +95,7 @@ if pipeline['control']:
         print('using first-principles model')
 
     # check feasibility of the current state and input
-    #controller.confirm_feasibility(x, controller.u0)
+    controller.confirm_feasibility(x, controller.u0)
 
     # initialize the control input
     u = controller.u0
