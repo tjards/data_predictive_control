@@ -4,5 +4,6 @@
     "plot_velocities_path": "visualization/plots/velocities.png",
     "plot_field_path": "visualization/plots/field.png",
     "animate_field": "visualization/animations/field.gif",
-    "keep_modelling_history": true
+    "keep_modelling_history": true,
+    "show_field": true
 }

@@ -120,7 +120,7 @@ if pipeline['control']:
         x = plant.evolve(x, u, d, disturb=True)
 
         data.stage(phase = 'controller', 
-                step = k, 
+                step = t, 
                 A_hat = controller.A, 
                 B_hat = controller.B, 
                 d_hat = controller.d_hat, 
@@ -157,26 +157,34 @@ if pipeline['visuals']:
     plot_inputs_path        = cfg_viz['plot_inputs_path']
     plot_velocities_path    = cfg_viz['plot_velocities_path']
     keep_modelling_history  = cfg_viz['keep_modelling_history']
+    show_field              = cfg_viz['show_field']
 
     with open('configs/config_mpc.json') as f:
         cfg_mpc = json.load(f)
     constraints = cfg_mpc['constraints']
 
+    if show_field:
+        V = None
+    else:
+        V = None
+
     if keep_modelling_history:
         full_state_history      = list(modelling_data["state"]) + list(controller_data["state"])[1:]  # avoid duplicate x0
         full_input_history      = list(modelling_data["input"]) + list(controller_data["input"])
         predicted_sequences     = [None] * len(modelling_data["state"]) + list(controller_data["plan"])
+        time_history            = list(modelling_data["step"]) + list(controller_data["step"])
     else:
         full_state_history      = list(controller_data["state"]) 
         full_input_history      = list(controller_data["input"])
         predicted_sequences     = list(controller_data["plan"])
+        time_history            = list(controller_data["step"])
 
     #plot.animate_trajectory(full_state_history, predicted_sequences, solve_discrete_are(controller.A, controller.B, controller.Q, controller.R),filename=animate_path)
     
     print('Producing animation...')
-    plot.animate_trajectory(full_state_history, predicted_sequences, V = None, filename=animate_path)
+    plot.animate_trajectory(time_history, full_state_history, predicted_sequences, field = None, filename=animate_path)
     print('Producing plots...')
-    plot.plot_inputs(full_input_history, constraints, filename=plot_inputs_path)
-    plot.plot_velocities(full_state_history, constraints, filename=plot_velocities_path)
+    plot.plot_inputs(time_history, full_input_history, constraints, filename=plot_inputs_path)
+    plot.plot_velocities(time_history, full_state_history, constraints, filename=plot_velocities_path)
 
 

@@ -134,7 +134,7 @@ class Modeller():
             input_history.append(u_exc.copy())
             A_hat_history.append(self.A_hat.tolist())
             B_hat_history.append(self.B_hat.tolist())
-            step_history.append(k)
+            step_history.append(t)
 
             # log
             #model_log.write(f'exc_{k + 1},{self.A_hat.tolist()},{self.B_hat.tolist()}\n')

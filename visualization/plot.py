@@ -20,7 +20,7 @@ import json
 #    return np.einsum('...i,ij,...j->...', pts, V2, pts)
 
 
-def animate_trajectory(state_history, predicted_sequences, V = None,
+def animate_trajectory(time_history, state_history, predicted_sequences, field = None,
                        x_target=None, filename='trajectory.gif'):
     
     states = np.array(state_history)        
@@ -141,11 +141,11 @@ def animate_trajectory(state_history, predicted_sequences, V = None,
     plt.close(fig)
 
 
-def plot_inputs(input_history, constraints, filename='inputs.png'):
+def plot_inputs(time_history, input_history, constraints, filename='inputs.png'):
 
     inputs = np.array(input_history)   
     T, nu  = inputs.shape
-    steps  = np.arange(T)
+    steps  = time_history #np.arange(T)
 
     # bounds
     u_min = u_max = None
@@ -174,7 +174,7 @@ def plot_inputs(input_history, constraints, filename='inputs.png'):
         ax.legend(loc='upper right', fontsize=9)
         ax.grid(True, linestyle=':', alpha=0.5)
 
-    axes[-1].set_xlabel('Time step $k$', fontsize=12)
+    axes[-1].set_xlabel('Time, $t$ [secs]', fontsize=12)
     fig.suptitle('Control Inputs vs. Constraints', fontsize=13)
     plt.tight_layout()
     plt.savefig(filename, dpi=150)
@@ -182,11 +182,11 @@ def plot_inputs(input_history, constraints, filename='inputs.png'):
     plt.close(fig)
 
 
-def plot_velocities(state_history, constraints, vel_indices=None, filename='velocities.png'):
+def plot_velocities(time_history, state_history, constraints, vel_indices=None, filename='velocities.png'):
 
     states = np.array(state_history)   # (T+1, nx)
     T, nx  = states.shape
-    steps  = np.arange(T)
+    steps  = time_history[1:] #np.arange(T)
 
     if vel_indices is None:
         vel_indices = list(range(nx // 2, nx))
@@ -220,7 +220,7 @@ def plot_velocities(state_history, constraints, vel_indices=None, filename='velo
         ax.legend(loc='upper right', fontsize=9)
         ax.grid(True, linestyle=':', alpha=0.5)
 
-    axes[-1].set_xlabel('Time step $k$', fontsize=12)
+    axes[-1].set_xlabel('Time, $t$ [secs]', fontsize=12)
     fig.suptitle('Velocity States vs. Constraints', fontsize=13)
     plt.tight_layout()
     plt.savefig(filename, dpi=150)
