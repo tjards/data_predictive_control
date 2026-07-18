@@ -14,7 +14,7 @@ from data_manager import Dataset
 # Pipeline Setup
 # ------------------------------------------------------------------ 
 pipeline = {
-    'model':    True,
+    'model':    False,
     'control':  True,
     'visuals':  True
 }
@@ -30,8 +30,8 @@ plant = le_plant.Plant()
 x = plant.x0.copy()
 
 # initialize disturbances
-disturbor = disturbance_generator.Disturbance()
-d = disturbor.evolve(t)
+disturbor = disturbance_generator.Disturbance(field = None)
+d = disturbor.evolve(field = None, x = x, t = t)
 
 # initial dataset
 with open('configs/config_data.json') as f:
@@ -80,6 +80,12 @@ B_hat = modelling_data['B_hat'][-1]
 B_hat[B_hat < epsilon] = 0.0
 
 # ------------------------------------------------------------------
+# Create disturbance field 
+# ------------------------------------------------------------------
+import nonlinear_field
+field = nonlinear_field.VortexField()
+disturbor = disturbance_generator.Disturbance(field = field, x = x, t = t)
+# ------------------------------------------------------------------
 # Run the Controller 
 # ------------------------------------------------------------------
 if pipeline['control']:
@@ -114,7 +120,8 @@ if pipeline['control']:
         u = controller.result_control_next.flatten()
 
         # evolve the disturbance
-        d = disturbor.evolve(k*controller.Ts)
+        d = disturbor.evolve(field = field, x = x, t = t)
+
 
         # evolve the plant
         x = plant.evolve(x, u, d, disturb=True)
@@ -174,7 +181,7 @@ if pipeline['visuals']:
         predicted_sequences     = [None] * len(modelling_data["state"]) + list(controller_data["plan"])
         time_history            = list(modelling_data["step"]) + list(controller_data["step"])
     else:
-        full_state_history      = list(controller_data["state"]) 
+        full_state_history      = list(controller_data["state"])[1:]  
         full_input_history      = list(controller_data["input"])
         predicted_sequences     = list(controller_data["plan"])
         time_history            = list(controller_data["step"])
@@ -182,7 +189,12 @@ if pipeline['visuals']:
     #plot.animate_trajectory(full_state_history, predicted_sequences, solve_discrete_are(controller.A, controller.B, controller.Q, controller.R),filename=animate_path)
     
     print('Producing animation...')
-    plot.animate_trajectory(time_history, full_state_history, predicted_sequences, field = None, filename=animate_path)
+
+    if show_field:
+        field_in = field
+    else:
+        field_in = None
+    plot.animate_trajectory(time_history, full_state_history, predicted_sequences, field = field_in, filename=animate_path)
     print('Producing plots...')
     plot.plot_inputs(time_history, full_input_history, constraints, filename=plot_inputs_path)
     plot.plot_velocities(time_history, full_state_history, constraints, filename=plot_velocities_path)

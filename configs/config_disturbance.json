@@ -1,5 +1,5 @@
 
 {
-    "type": "linear",
+    "type": "field",
     "d_lin": [0.5,-0.6]
 }

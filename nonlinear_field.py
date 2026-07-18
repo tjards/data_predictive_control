@@ -127,10 +127,19 @@ class VortexField:
 
         return d_actual
 
-    def grid_for_plots(self, t):
+    #def grid_for_plots(self, t):
+    def grid_for_plots(self, t, xlim = None, ylim = None):
 
-        xs = np.linspace(self.config.pp.xlim[0], self.config.pp.xlim[1], self.config.pp.n)
-        ys = np.linspace(self.config.pp.ylim[0], self.config.pp.ylim[1], self.config.pp.n)
+        if xlim is None:
+            xlim = self.config.pp.xlim
+
+        if ylim is None:
+            ylim = self.config.pp.ylim
+
+        #xs = np.linspace(self.config.pp.xlim[0], self.config.pp.xlim[1], self.config.pp.n)
+        #ys = np.linspace(self.config.pp.ylim[0], self.config.pp.ylim[1], self.config.pp.n)
+        xs = np.linspace(xlim[0], xlim[1], self.config.pp.n)
+        ys = np.linspace(ylim[0], ylim[1], self.config.pp.n)
 
         X, Y = np.meshgrid(xs, ys)
         U = np.zeros_like(X)
@@ -208,9 +217,9 @@ class VortexField:
 
 
 # testing 
-field = VortexField()
-field.plot_field_at_t(plot_field_path = 'visualization/plots/field.png', t =0.0)
-field.animate_field(animate_field_path="visualization/animations/field.gif")
+#field = VortexField()
+#field.plot_field_at_t(plot_field_path = 'visualization/plots/field.png', t =0.0)
+#field.animate_field(animate_field_path="visualization/animations/field.gif")
 
 
 

@@ -23,10 +23,12 @@ import json
 def animate_trajectory(time_history, state_history, predicted_sequences, field = None,
                        x_target=None, filename='trajectory.gif'):
     
-    states = np.array(state_history)        
-    T      = len(predicted_sequences)      
+    
+    times   = np.array(time_history)
+    states  = np.array(state_history)        
+    T       = len(predicted_sequences)      
     #nx     = V.shape[0]
-    nx = states.shape[0]
+    nx      = states.shape[0]
 
     if x_target is None:
         x_target = np.zeros(nx)
@@ -67,10 +69,39 @@ def animate_trajectory(time_history, state_history, predicted_sequences, field =
     # levels = np.logspace(np.log10(z_lo), np.log10(z_hi), 30)
 
     # ------------------------------------------------------------------
+    # Field contour 
+    # ------------------------------------------------------------------
+
+    field_contour   = None
+    field_level     = None
+
+    if field is not None:
+
+        speed_max = 0.0
+
+        sample_frames = np.linspace(0, len(states) - 1, min(20, len(states)), dtype=int)
+
+        for frame in sample_frames:
+
+            _, _, _, _, speed = field.grid_for_plots(t=times[frame], xlim=(x1_min, x1_max), ylim=(x2_min, x2_max))
+
+            speed_max = max(speed_max, float(speed.max()))
+            field_levels = np.linspace(0.0,  max(speed_max, 1e-8), field.config.pp.levels)
+
+
+    # ------------------------------------------------------------------
     # Figure elements
     # ------------------------------------------------------------------
     
     fig, ax = plt.subplots(figsize=(7, 7))
+    field_contour = [None]
+
+    if field is not None:
+
+        X, Y, U, W, speed = field.grid_for_plots( t=times[0], xlim=(x1_min, x1_max), ylim=(x2_min, x2_max))
+        field_contour[0] = ax.contourf(X, Y, speed, levels=field_levels, alpha=field.config.pp.alpha, zorder=0)
+        fig.colorbar(field_contour[0], ax=ax, label='Disturbance intensity')
+
 
     # contours
     #ax.contourf(X, Y, Z, levels=levels, cmap='gray_r')
@@ -111,6 +142,19 @@ def animate_trajectory(time_history, state_history, predicted_sequences, field =
 
     def update(frame):
         
+        #disturbance update
+        if field is not None:
+
+            field_contour[0].remove()
+
+            X, Y, U, W, speed = field.grid_for_plots( t=times[frame], xlim=(x1_min, x1_max), ylim=(x2_min, x2_max))
+            field_contour[0] = ax.contourf(X, Y, speed, levels=field_levels, alpha=field.config.pp.alpha, zorder=0)
+            #fig.colorbar(field_contour, ax=ax, label='Disturbance intensity')
+
+
+  
+
+
         # trajectory update 
         trace_line.set_data(states[:frame + 1, 0], states[:frame + 1, 1])
         cur_dot.set_data([states[frame, 0]], [states[frame, 1]])
@@ -132,7 +176,7 @@ def animate_trajectory(time_history, state_history, predicted_sequences, field =
         fig, update,
         frames=len(states),
         init_func=init,
-        blit=True,
+        blit=False,
         interval=150,
     )
 
