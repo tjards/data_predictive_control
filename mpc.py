@@ -124,7 +124,7 @@ class Modeller():
             self.update(x, u_exc)
 
             # evolve the disturbance
-            d = disturbor.evolve(k*self.Ts)
+            d = disturbor.evolve(field = None, x = x, t = k*self.Ts)
 
             # evolve the plant
             x = plant.evolve(x, u_exc, d, disturb = False)

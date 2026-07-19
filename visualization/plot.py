@@ -32,7 +32,8 @@ def animate_trajectory(time_history, state_history, predicted_sequences, field =
 
     if x_target is None:
         x_target = np.zeros(nx)
-    x_target = np.asarray(x_target, dtype=float)
+    #x_target = np.asarray(x_target, dtype=float)
+    x_target = np.array(x_target)
 
     # ------------------------------------------------------------------
     # Grid bounds: cover all actual + predicted states with margin
@@ -40,10 +41,16 @@ def animate_trajectory(time_history, state_history, predicted_sequences, field =
     all_pts = np.vstack([states[:, :2]] + [p[:, :2] for p in predicted_sequences if p is not None])
     margin  = 0.5
 
-    x1_min = min(all_pts[:, 0].min(), x_target[0]) - margin
-    x1_max = max(all_pts[:, 0].max(), x_target[0]) + margin
-    x2_min = min(all_pts[:, 1].min(), x_target[1]) - margin
-    x2_max = max(all_pts[:, 1].max(), x_target[1]) + margin
+    #x1_min = min(all_pts[:, 0].min(), x_target[0]) - margin
+    #x1_max = max(all_pts[:, 0].max(), x_target[0]) + margin
+    #x2_min = min(all_pts[:, 1].min(), x_target[1]) - margin
+    #x2_max = max(all_pts[:, 1].max(), x_target[1]) + margin
+
+    x1_min = min(all_pts[:, 0].min(), x_target[0, 0]) - margin
+    x1_max = max(all_pts[:, 0].max(), x_target[0, 0]) + margin
+    x2_min = min(all_pts[:, 1].min(), x_target[0, 1]) - margin
+    x2_max = max(all_pts[:, 1].max(), x_target[0, 1]) + margin
+
 
     # square the grid for better visualization
     r1, r2 = x1_max - x1_min, x2_max - x2_min
@@ -108,13 +115,16 @@ def animate_trajectory(time_history, state_history, predicted_sequences, field =
     #ax.contour(X, Y, Z, levels=levels, colors='dimgray', linewidths=0.4, linestyles='--', alpha=0.5)
 
     # targets
-    ax.plot(x_target[0], x_target[1], 'g+', markersize=14, markeredgewidth=2, label='target', zorder=6)
-    
+    #ax.plot(x_target[0], x_target[1], 'g+', markersize=14, markeredgewidth=2, label='target', zorder=6)
+    #ax.plot(x_target[0, 0], x_target[0, 1], 'g+', markersize=14, markeredgewidth=2, label='target', zorder=6)
+    cur_target,    = ax.plot([], [], 'g+', markersize=14, markeredgewidth=2, label='target', zorder=6)
+    trace_target,  = ax.plot([], [], color='green', lw=2.0, zorder=5)
+
     # states
     ax.plot(states[0, 0], states[0, 1], 'ro', markersize=8, label='start', zorder=6)
 
     # trajectory
-    trace_line, = ax.plot([], [], color='royalblue', lw=2.0, label='trajectory', zorder=5)
+    trace_line, = ax.plot([], [], color='royalblue', lw=2.0, zorder=5)
     cur_dot,    = ax.plot([], [], 'o', color='royalblue', markersize=8, zorder=7)
     
     # predictions 
@@ -138,7 +148,8 @@ def animate_trajectory(time_history, state_history, predicted_sequences, field =
         cur_dot.set_data([], [])
         pred_line.set_data([], [])
         pred_dots.set_data([], [])
-        return trace_line, cur_dot, pred_line, pred_dots
+        cur_target.set_data([], [])
+        return trace_line, cur_dot, pred_line, pred_dots, cur_target, trace_target
 
     def update(frame):
         
@@ -152,12 +163,13 @@ def animate_trajectory(time_history, state_history, predicted_sequences, field =
             #fig.colorbar(field_contour, ax=ax, label='Disturbance intensity')
 
 
-  
-
-
         # trajectory update 
         trace_line.set_data(states[:frame + 1, 0], states[:frame + 1, 1])
         cur_dot.set_data([states[frame, 0]], [states[frame, 1]])
+
+        # target update
+        cur_target.set_data([x_target[frame, 0]], [x_target[frame, 1]])
+        trace_target.set_data(x_target[:frame + 1, 0], x_target[:frame + 1, 1])
 
         # prediction update
         if frame < T and predicted_sequences[frame] is not None:
@@ -170,7 +182,7 @@ def animate_trajectory(time_history, state_history, predicted_sequences, field =
             pred_line.set_data([], [])
             pred_dots.set_data([], [])
 
-        return trace_line, cur_dot, pred_line, pred_dots
+        return trace_line, cur_dot, pred_line, pred_dots, cur_target, trace_target
 
     ani = animation.FuncAnimation(
         fig, update,

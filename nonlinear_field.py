@@ -32,16 +32,20 @@ class VortexConfig():
             [-2.5, 2.0],
             [2.0, 2.0],
             [2.5, -2.0],
+            [-2.0, -1.5]
+            
         ]) 
         
         # corresponding size(s), amplitudes(s), and rate(s)
         self.vortex_sigmas = np.array([1.5, 
                                        1.8, 
-                                       1.4])
-        self.vortex_amps = np.array([0.65, 
+                                       1.4,
+                                       2.0])
+        self.vortex_amps = 5*np.array([0.65, 
                                      1.00,
-                                     -0.75])
-        self.background_amp = 0.35
+                                     -0.75,
+                                     0.90])
+        self.background_amp = 5*0.35
         self.omega = 0.2 #0.35
         self.moving_centers = True
         self.center_motion_amp = 0.35

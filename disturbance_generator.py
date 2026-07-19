@@ -17,7 +17,7 @@ class Disturbance:
         elif self.dist_type == 'field' and field is not None:
             self.d = field.compute_disturbance(x, t)
         else:
-            self.d = np.array(cfg['d_lin'])
+            self.d = 0*np.array(cfg['d_lin'])
 
     def evolve(self, field = None, x = None, t = None):
 

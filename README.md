@@ -116,11 +116,22 @@ Without disturbance rejection the trajectory drifts from the origin; notice the 
 |:---:|:---:|
 | ![Control inputs within bounds](docs/windy/inputs_withoutdist.png) | ![Velocity states within bounds](docs/windy/velocities_withoutdist.png) |
 
+## Nonlinear disturbances
+
+Here we see the technique works surprisingly well, even when a nonlinear disturbance field is generated. We generated nonlinear disturbances through a vector field with four rotating vortices and cyclical background winds. While the controller makes a linear assumption internally, the fact that the controller is updated online has the effect of discovering local, linear approximations within this field. 
+
+| Without Disturbance Rejection | With Disturbance Rejection |
+|:---:|:---:|
+| ![Trajectory without disturbance rejection](docs/disturbance/trajectory_field_no.gif) | ![Trajectory with disturbance rejection](docs/disturbance/trajectory_field_yes.gif) |
+
+
 ## Discussion
 
 The formulation and results above demonstrate that a convex data-driven predictive control framework can be implemented without requiring a priori knowledge of the plant model. Moreover, the framework is robust to biased conditions (e.g., wind) by estimating and rejecting disturbances online. 
 
 The use of convex optimization ensures the control problem remains tractable and can be solved efficiently at each time step. This approach is applicable to a wide range of systems, provided their dynamics can be approximated as linear and the disturbances are slowly varying.
+
+The linear disturbance rejection technique works well even in nonlinear vortex fields, when estimates are updated online.
 
 ## Use
 
